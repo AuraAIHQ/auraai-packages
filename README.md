@@ -70,6 +70,8 @@ pnpm release
 > **⚠️ 翻开 private 前的 checklist**（手动或 CI 检查）：
 > - `dist/` 目录存在且包含 `index.js`
 > - `package.json` 的 `main` 指向 `dist/`，不是 `src/`
+> - `package.json` 的 `exports`（如有）也指向 `dist/`
+> - `package.json` 的 `files` 改为 `["dist", "README.md", "LICENSE"]` —— 不再发 `src/`（避免发布测试文件）
 > - `tsconfig.build.json` 跑过 `noEmitOnError: true` 校验
 > - `LICENSE` 文件存在（已加入各包）
 
