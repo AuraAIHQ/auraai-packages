@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/*"
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      changesets:
+        patterns:
+          - "@changesets/*"
+      turbo:
+        patterns:
+          - "turbo"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

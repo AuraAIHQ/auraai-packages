@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main, m0-foundation, m1-*, m2-*, m3-*]
+  pull_request:
+    branches: [main, m0-foundation, m1-*, m2-*, m3-*]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  typecheck-test:
+    name: Typecheck + Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2  # for changeset detection on PRs
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Cache turbo build outputs
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test:turbo
+
+  publish-hygiene:
+    name: Publish hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify private packages have no dist/ in git
+        run: |
+          set -e
+          for pkg_json in packages/*/package.json community/*/package.json publishers/*/package.json scrapers/*/package.json idoris/*/package.json; do
+            [ -f "$pkg_json" ] || continue
+            pkg_dir=$(dirname "$pkg_json")
+            is_private=$(node -p "require('./$pkg_json').private || false" 2>/dev/null || echo "false")
+            if [ "$is_private" = "false" ]; then
+              # Public package: must have dist/index.js + main pointing to dist/
+              main=$(node -p "require('./$pkg_json').main || ''" 2>/dev/null)
+              if [[ "$main" != dist/* ]]; then
+                echo "❌ $pkg_json: public package main='$main' must point to dist/"
+                exit 1
+              fi
+              if [ ! -f "$pkg_dir/dist/index.js" ]; then
+                echo "❌ $pkg_dir: public package missing dist/index.js"
+                exit 1
+              fi
+              # Must have LICENSE
+              if [ ! -f "$pkg_dir/LICENSE" ]; then
+                echo "❌ $pkg_dir: public package missing LICENSE"
+                exit 1
+              fi
+              echo "✅ $pkg_dir: public package hygiene OK"
+            else
+              echo "⏭️  $pkg_dir: private (skipping publish hygiene)"
+            fi
+          done
+
+  changeset-check:
+    name: Changeset present
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    if: github.event_name == 'pull_request' && github.base_ref != 'main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify changeset exists for source changes
+        run: |
+          set -e
+          # Find changed files in this PR
+          BASE_REF="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          CHANGED_FILES=$(git diff --name-only "$BASE_REF...HEAD")
+
+          # If any source/config under packages/community/publishers/scrapers/idoris changed,
+          # require a new .changeset/*.md file in this PR
+          NEEDS_CHANGESET=$(echo "$CHANGED_FILES" | grep -E '^(packages|community|publishers|scrapers|idoris)/[^/]+/(src|package\.json|tsconfig|vitest\.config)' || true)
+          NEW_CHANGESETS=$(echo "$CHANGED_FILES" | grep -E '^\.changeset/[^/]+\.md$' | grep -v 'README' || true)
+
+          if [ -n "$NEEDS_CHANGESET" ] && [ -z "$NEW_CHANGESETS" ]; then
+            echo "❌ Source/config changes detected but no .changeset/*.md added"
+            echo "Changed files:"
+            echo "$NEEDS_CHANGESET"
+            echo ""
+            echo "Add a changeset with: pnpm changeset"
+            exit 1
+          fi
+
+          echo "✅ Changeset hygiene OK"
