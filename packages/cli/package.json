@@ -1,10 +1,19 @@
 {
   "name": "@auraaihq/cli",
   "version": "0.0.0",
+  "private": true,
   "description": "CLI for scaffolding, debugging, and managing Agent24-Desktop modules",
   "license": "MIT",
   "type": "module",
   "main": "src/index.ts",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "echo 'build TBD (M1) — when implemented, use: tsc -p tsconfig.build.json'",

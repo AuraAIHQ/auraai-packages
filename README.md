@@ -36,6 +36,7 @@ pnpm -r typecheck      # 类型检查（每个包独立）
 pnpm test              # 运行所有测试（vitest）
 pnpm test:watch        # 测试 watch 模式
 pnpm test:coverage     # 测试 + 覆盖率报告
+pnpm bench             # 运行 benchmarks（vitest bench）
 pnpm --filter @auraaihq/core build   # 单包构建
 ```
 
