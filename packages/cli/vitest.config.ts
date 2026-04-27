@@ -6,7 +6,7 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
     benchmark: {
-      include: ['src/**/*.bench.?(c|m)[jt]s?(x)'],
+      include: ['src/**/*.{bench,benchmark}.?(c|m)[jt]s?(x)'],
     },
   },
 })

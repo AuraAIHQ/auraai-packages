@@ -8,7 +8,8 @@ export default defineConfig({
     // intentionally NOT included — run via `vitest bench` separately.
     include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
     benchmark: {
-      include: ['src/**/*.bench.?(c|m)[jt]s?(x)'],
+      // Vitest also accepts `.benchmark.*` by default — support both.
+      include: ['src/**/*.{bench,benchmark}.?(c|m)[jt]s?(x)'],
     },
   },
 })
