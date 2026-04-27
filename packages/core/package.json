@@ -10,8 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "echo 'build TBD (M1)'",
-    "test": "echo 'tests TBD (M1)'"
+    "build": "echo 'build TBD (M1)'"
   },
   "publishConfig": {
     "access": "public"

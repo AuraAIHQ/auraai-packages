@@ -32,9 +32,14 @@ idoris/        # iDoris 能力包装 (input, process, query, create)
 ```bash
 pnpm install           # 安装所有 workspace 依赖
 pnpm -r build          # 构建所有包
-pnpm -r typecheck      # 类型检查
+pnpm -r typecheck      # 类型检查（每个包独立）
+pnpm test              # 运行所有测试（vitest）
+pnpm test:watch        # 测试 watch 模式
+pnpm test:coverage     # 测试 + 覆盖率报告
 pnpm --filter @auraaihq/core build   # 单包构建
 ```
+
+测试约定：测试文件放在 `packages/<pkg>/src/**/*.test.ts`。配置见根 `vitest.config.ts`。
 
 ## Versioning & Publishing
 
