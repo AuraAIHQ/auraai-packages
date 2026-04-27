@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { VERSION, main } from './index'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('@auraaihq/cli', () => {
   it('exports VERSION', () => {
@@ -10,6 +14,5 @@ describe('@auraaihq/cli', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
     main()
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('M0 placeholder'))
-    spy.mockRestore()
   })
 })
