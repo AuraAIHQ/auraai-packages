@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     name: '@auraaihq/cli',
     environment: 'node',
-    include: ['src/**/*.{test,spec,bench}.?(c|m)[jt]s?(x)'],
+    include: ['src/**/*.{test,spec}.?(c|m)[jt]s?(x)'],
+    benchmark: {
+      include: ['src/**/*.bench.?(c|m)[jt]s?(x)'],
+    },
   },
 })
