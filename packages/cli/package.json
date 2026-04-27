@@ -1,0 +1,19 @@
+{
+  "name": "@auraaihq/cli",
+  "version": "0.0.0",
+  "description": "CLI for scaffolding, debugging, and managing Agent24-Desktop modules",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "auraai": "src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'build TBD (M1)'",
+    "test": "echo 'tests TBD (M1)'"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

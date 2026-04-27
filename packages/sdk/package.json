@@ -1,0 +1,19 @@
+{
+  "name": "@auraaihq/sdk",
+  "version": "0.0.0",
+  "description": "Public SDK for Agent24-Desktop module developers — types, helpers, lifecycle hooks",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'build TBD (M1)'",
+    "test": "echo 'tests TBD (M1)'"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
