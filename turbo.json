@@ -1,6 +1,12 @@
 {
   "$schema": "https://turborepo.com/schema.json",
-  "ui": "tui",
+  "globalDependencies": [
+    "tsconfig.base.json",
+    "tsconfig.build.base.json",
+    "vitest.config.ts",
+    "pnpm-lock.yaml",
+    ".npmrc"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -43,8 +49,7 @@
     },
     "bench": {
       "dependsOn": ["^build"],
-      "cache": false,
-      "persistent": false
+      "cache": false
     },
     "clean": {
       "cache": false
