@@ -65,7 +65,13 @@ pnpm version
 pnpm release
 ```
 
-`access: public` 已配置，所有 `@auraaihq/*` 包默认公开发布。
+`access: public` 已配置，但 M0 阶段所有包标记为 `"private": true`——避免在没有真正 build pipeline 之前误发 `.ts` 入口。M1 实现真正构建后再翻开 private 标志。
+
+> **⚠️ 翻开 private 前的 checklist**（手动或 CI 检查）：
+> - `dist/` 目录存在且包含 `index.js`
+> - `package.json` 的 `main` 指向 `dist/`，不是 `src/`
+> - `tsconfig.build.json` 跑过 `noEmitOnError: true` 校验
+> - `LICENSE` 文件存在（已加入各包）
 
 ## License
 
