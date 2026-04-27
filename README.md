@@ -36,9 +36,25 @@ pnpm -r typecheck      # 类型检查
 pnpm --filter @auraaihq/core build   # 单包构建
 ```
 
-## Publishing
+## Versioning & Publishing
 
-使用 [changesets](https://github.com/changesets/changesets)（待集成）协同版本管理。
+使用 [changesets](https://github.com/changesets/changesets) 管理版本与 CHANGELOG。**Independent versioning**——每包独立版本号。
+
+```bash
+# 1. 改动代码后，添加一条 changeset
+pnpm changeset
+# 交互式选择影响哪些包 + bump 类型 (patch/minor/major) + 写描述
+
+# 2. 在 PR 中 commit `.changeset/*.md` 文件
+
+# 3. 合并到 main 后，跑 version 命令更新版本号 + CHANGELOG
+pnpm version
+
+# 4. 发布到 npm
+pnpm release
+```
+
+`access: public` 已配置，所有 `@auraaihq/*` 包默认公开发布。
 
 ## License
 
