@@ -39,7 +39,12 @@ pnpm test:coverage     # 测试 + 覆盖率报告
 pnpm --filter @auraaihq/core build   # 单包构建
 ```
 
-测试约定：测试文件放在 `packages/<pkg>/src/**/*.test.ts`。配置见根 `vitest.config.ts`。
+**测试约定**：
+
+- 文件位置：`<group>/<pkg>/src/**/*.{test,spec}.?(c|m)[jt]s?(x)`（test 与 spec 都识别）
+- benchmarks：`<group>/<pkg>/src/**/*.{bench,benchmark}.?(c|m)[jt]s?(x)`，由 `pnpm bench` 触发
+- 配置：根 `vitest.config.ts` 管 coverage + projects；每包自己的 `vitest.config.ts` 决定 environment / include 等局部行为
+- Projects：根 vitest 跨 `packages/community/publishers/scrapers/idoris` 五个 group 自动发现各包的 `vitest.config.{ts,js,mjs}`
 
 ## Versioning & Publishing
 

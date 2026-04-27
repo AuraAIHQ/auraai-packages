@@ -2,4 +2,4 @@
 "@auraaihq/cli": patch
 ---
 
-CLI: refactor to expose `main()` function and only auto-execute when run directly. This enables unit testing without side effects on import.
+CLI placeholder simplification: remove `bin` field and shebang; CLI is now library-only for M0 (no .ts-as-bin runtime hazard). Real CLI binary with proper compile pipeline arrives in M1. Existing `main()` export remains for testing and future internal callers.

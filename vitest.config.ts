@@ -24,7 +24,7 @@ export default defineConfig({
         '**/*.spec.{ts,tsx,cts,mts,js,jsx}',
         '**/*.bench.{ts,tsx,cts,mts,js,jsx}',
         '**/*.benchmark.{ts,tsx,cts,mts,js,jsx}',
-        '**/*.d.ts',
+        '**/*.d.{ts,cts,mts}',
         '**/dist/**',
         '**/node_modules/**',
       ],
