@@ -1,0 +1,21 @@
+{
+  "name": "auraai-packages",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for @auraaihq/* packages — Agent24 ecosystem",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r clean"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

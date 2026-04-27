@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+.turbo/
+.next/
+*.log
+.DS_Store
+.vscode/
+.idea/
+coverage/
+*.tsbuildinfo
