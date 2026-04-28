@@ -112,6 +112,8 @@ export type BridgeErrorCode =
   | 'duplicate_adapter'
   | 'duplicate_in_order'
   | 'policy_error'
+  | 'policy_invalid_return'
+  | 'invalid_adapter_metadata'
   | 'aggregate'
   | 'unsupported_method'
 
@@ -214,9 +216,10 @@ export function createBridge(options: BridgeOptions): Bridge {
       try {
         normalized = normalizeMaxConcurrency(max)
       } catch (error) {
+        const reason = error instanceof Error ? error.message : safeToString(error)
         throw new BridgeError(
-          'duplicate_adapter',  // mis-config category
-          `adapter '${sanitizeForMessage(a.metadata.id)}' has invalid maxConcurrency: ${safeToString(error)}`,
+          'invalid_adapter_metadata',
+          `adapter '${sanitizeForMessage(a.metadata.id)}' has invalid maxConcurrency: ${sanitizeForMessage(reason)}`,
           error,
         )
       }
@@ -385,12 +388,12 @@ export function createBridge(options: BridgeOptions): Bridge {
 
     let order: readonly string[]
     if (policy) {
-      let policyOrder: readonly string[]
+      let policyOrder: readonly unknown[]
       // Hand the policy an immutable view of available ids so it
       // can't accidentally corrupt our internal state.
       const availableSnapshot = Object.freeze([...adapterMap.keys()])
       try {
-        policyOrder = policy.pickOrder(prompt, options, availableSnapshot)
+        policyOrder = policy.pickOrder(prompt, options, availableSnapshot) as readonly unknown[]
       } catch (error) {
         const msg = error instanceof Error ? error.message : safeToString(error)
         throw new BridgeError(
@@ -399,12 +402,31 @@ export function createBridge(options: BridgeOptions): Bridge {
           error,
         )
       }
-      if (policyOrder.length === 0) {
+      // Validate policy return shape — TypeScript's `readonly string[]`
+      // signature can't enforce this at runtime; user policies (or
+      // policies authored in plain JS) might return non-arrays or
+      // non-string elements that would crash sanitization later.
+      if (!Array.isArray(policyOrder)) {
+        throw new BridgeError(
+          'policy_invalid_return',
+          `routing policy must return an array of strings, got ${typeof policyOrder}`,
+        )
+      }
+      for (let i = 0; i < policyOrder.length; i += 1) {
+        if (typeof policyOrder[i] !== 'string') {
+          throw new BridgeError(
+            'policy_invalid_return',
+            `routing policy returned non-string at index ${i}: ${typeof policyOrder[i]}`,
+          )
+        }
+      }
+      const validatedOrder = policyOrder as readonly string[]
+      if (validatedOrder.length === 0) {
         throw new BridgeError('no_adapters', 'routing policy returned empty order')
       }
       // Snapshot to defend against the policy mutating its own return
       // value mid-flight (would otherwise change the iteration target).
-      const snapshot = Object.freeze([...policyOrder])
+      const snapshot = Object.freeze([...validatedOrder])
       order = assertNoDuplicateIds(snapshot)
     } else {
       order = defaultOrder

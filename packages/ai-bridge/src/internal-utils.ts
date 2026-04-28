@@ -94,17 +94,29 @@ export class SemaphoreAbortError extends Error {
 }
 
 /**
- * Validate and normalize a concurrency limit. Returns a positive
- * integer; throws TypeError if the input is not a finite number.
- * Caller decides whether to throw or skip on invalid input.
+ * Validate a concurrency limit. Strict: must be a positive integer
+ * (no NaN, Infinity, floats, strings, or other types). Returns the
+ * value unchanged on success; throws TypeError otherwise.
  */
 export function normalizeMaxConcurrency(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
+    // Use safeToString — adversarial objects with throwing toString
+    // would otherwise crash this helper.
     throw new TypeError(
-      `maxConcurrency must be a finite number, got ${typeof value} ${String(value)}`,
+      `maxConcurrency must be a finite number, got ${typeof value}: ${safeToString(value)}`,
     )
   }
-  return Math.max(1, Math.floor(value))
+  if (!Number.isInteger(value)) {
+    throw new TypeError(
+      `maxConcurrency must be an integer, got ${value}`,
+    )
+  }
+  if (value < 1) {
+    throw new TypeError(
+      `maxConcurrency must be >= 1, got ${value}`,
+    )
+  }
+  return value
 }
 
 interface QueueEntry {

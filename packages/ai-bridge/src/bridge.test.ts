@@ -288,6 +288,29 @@ describe('@auraaihq/ai-bridge', () => {
       expect(err.code).toBe('unknown_adapter')
     })
 
+    it('throws BridgeError(policy_invalid_return) when policy returns non-array', async () => {
+      const bridge = createBridge({
+        adapters: [createInProcessAdapter({ id: 'a' })],
+        policy: { pickOrder: () => ('not-an-array' as unknown as readonly string[]) },
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('policy_invalid_return')
+    })
+
+    it('throws BridgeError(policy_invalid_return) when policy returns array with non-string elements', async () => {
+      const bridge = createBridge({
+        adapters: [createInProcessAdapter({ id: 'a' })],
+        policy: {
+          pickOrder: () => (['a', 42] as unknown as readonly string[]),
+        },
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('policy_invalid_return')
+      expect((err as Error).message).toContain('index 1')
+    })
+
     it('throws BridgeError(duplicate_in_order) when policy returns duplicates', async () => {
       const bridge = createBridge({
         adapters: [createInProcessAdapter({ id: 'a' })],
@@ -539,12 +562,66 @@ describe('@auraaihq/ai-bridge', () => {
       await Promise.all([p1, p2, p3])
     })
 
-    it('rejects invalid maxConcurrency at construction', () => {
+    it('rejects invalid maxConcurrency at construction with invalid_adapter_metadata code', () => {
       const adapter = createInProcessAdapter({
         id: 'badcfg',
         metadata: { maxConcurrency: NaN } as Partial<{ maxConcurrency: number }>,
       })
-      expect(() => createBridge({ adapters: [adapter] })).toThrow(/maxConcurrency/)
+      const err = (() => {
+        try {
+          createBridge({ adapters: [adapter] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+      expect((err as Error).message).toContain('maxConcurrency')
+    })
+
+    it('rejects float maxConcurrency (strict integer requirement)', () => {
+      const adapter = createInProcessAdapter({
+        id: 'floaty',
+        metadata: { maxConcurrency: 1.5 } as Partial<{ maxConcurrency: number }>,
+      })
+      const err = (() => {
+        try {
+          createBridge({ adapters: [adapter] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+      expect((err as Error).message).toMatch(/integer/)
+    })
+
+    it('rejects maxConcurrency < 1', () => {
+      const adapter = createInProcessAdapter({
+        id: 'zero',
+        metadata: { maxConcurrency: 0 } as Partial<{ maxConcurrency: number }>,
+      })
+      expect(() => createBridge({ adapters: [adapter] })).toThrow(/>= 1/)
+    })
+
+    it('sanitizes control chars in invalid maxConcurrency error message', () => {
+      // Adapter with newline-laden id; bridge should escape it in the error
+      const adapter = createInProcessAdapter({
+        id: 'evil\nid',
+        metadata: { maxConcurrency: NaN } as Partial<{ maxConcurrency: number }>,
+      })
+      const err = (() => {
+        try {
+          createBridge({ adapters: [adapter] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as Error).message).not.toMatch(/[\r\n]/)
     })
 
     it('aborts queued waiters when their signal fires (no slot waste)', async () => {

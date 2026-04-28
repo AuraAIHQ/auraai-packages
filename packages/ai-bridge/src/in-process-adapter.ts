@@ -124,7 +124,7 @@ export function createInProcessAdapter(options: InProcessAdapterOptions = {}): A
       if (options.throwCode) {
         throw new AdapterError(
           options.throwCode,
-          `dummy throwing ${options.throwCode}`,
+          `in-process adapter '${metadata.id}' throwing ${options.throwCode}`,
           metadata.id,
         )
       }
