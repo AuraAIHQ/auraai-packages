@@ -837,6 +837,36 @@ describe('@auraaihq/ai-bridge', () => {
       expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
     })
 
+    it('rejects adapter without complete function', () => {
+      const bad = {
+        metadata: { id: 'x', name: 'X', provider: 'other', local: true },
+      }
+      const err = (() => {
+        try {
+          createBridge({ adapters: [bad as unknown as Parameters<typeof createBridge>[0]['adapters'][number]] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+      expect((err as Error).message).toContain('complete must be a function')
+    })
+
+    it('rejects null adapter', () => {
+      const err = (() => {
+        try {
+          createBridge({ adapters: [null as unknown as Parameters<typeof createBridge>[0]['adapters'][number]] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+    })
+
     it('rejects missing metadata', () => {
       const bad = { metadata: undefined, async complete() { return { text: '' } } }
       const err = (() => {
@@ -955,16 +985,17 @@ describe('@auraaihq/ai-bridge isAdapterError', () => {
     expect(isAdapterError(fake)).toBe(true)
   })
 
-  it('matches when name is missing (post-minification scenario)', () => {
-    // Minifier or realm boundary may strip the name. Accept as long
-    // as the code is a valid AdapterErrorCode.
-    const fake = { code: 'rate_limit' as AdapterErrorCode, message: 'msg' }
+  it('matches when name is empty string on Error instance', () => {
+    const fake = Object.assign(new Error('msg'), {
+      name: '',
+      code: 'network' as AdapterErrorCode,
+    })
     expect(isAdapterError(fake)).toBe(true)
   })
 
-  it('matches when name is empty string', () => {
-    const fake = { name: '', code: 'network' as AdapterErrorCode, message: 'msg' }
-    expect(isAdapterError(fake)).toBe(true)
+  it('rejects plain object with right shape but no Error prototype', () => {
+    const plain = { code: 'rate_limit' as AdapterErrorCode, message: 'msg' }
+    expect(isAdapterError(plain)).toBe(false)
   })
 
   it('rejects when name is set to something unrelated', () => {
@@ -991,6 +1022,59 @@ describe('@auraaihq/ai-bridge isAdapterError', () => {
     expect(isAdapterError(undefined)).toBe(false)
     expect(isAdapterError('string')).toBe(false)
     expect(isAdapterError(42)).toBe(false)
+  })
+})
+
+describe('@auraaihq/ai-bridge sanitization', () => {
+  it('error messages with adversarial content stay bounded and printable', async () => {
+    const massive = '\n'.repeat(50000) + 'x'.repeat(50000)
+    const bridge = createBridge({
+      adapters: [
+        createInProcessAdapter({
+          id: 'a',
+          respond: () => {
+            throw new Error(massive)
+          },
+        }),
+      ],
+    })
+    const err = await bridge.complete('hi').catch((e) => e)
+    expect(err).toBeInstanceOf(AdapterError)
+    expect(err.message.length).toBeLessThanOrEqual(200)
+    expect(err.message).not.toMatch(/[\r\n]/)
+  })
+
+  it('isAdapterError rejects plain objects without Error prototype', () => {
+    // Right shape but NOT an Error instance (e.g., from JSON-deserialized
+    // remote payload masquerading as an error).
+    const plainObject = { name: 'AdapterError', code: 'rate_limit' as const, message: 'msg' }
+    expect(isAdapterError(plainObject)).toBe(false)
+  })
+
+  it('toAdapterError always returns a real Error instance', async () => {
+    // Cross-realm AdapterError-shaped object that's NOT an Error.
+    const fakeError = Object.assign(Object.create(null), {
+      name: 'AdapterError',
+      code: 'rate_limit',
+      message: 'fake',
+    })
+    let capturedThrow: unknown
+    const bridge = createBridge({
+      adapters: [
+        createInProcessAdapter({
+          id: 'a',
+          respond: () => {
+            capturedThrow = fakeError
+            throw fakeError as unknown as Error
+          },
+        }),
+      ],
+    })
+    const err = await bridge.complete('hi').catch((e) => e)
+    // Bridge must have wrapped to a real Error instance, NOT returned
+    // the bare fakeError.
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBe(capturedThrow)
   })
 })
 

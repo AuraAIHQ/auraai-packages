@@ -40,33 +40,43 @@ export function safeToString(value: unknown): string {
  * (adapter ids returned by user policy, thrown error messages, etc.).
  */
 export function sanitizeForMessage(value: string, maxLen = 200): string {
-  // Bound work to maxLen + a small expansion budget for escapes.
-  // Each char becomes at most "\\uNNNN" (6 chars), so cap input scan
-  // at maxLen * 6 worst-case to avoid pathological loops.
+  if (typeof value !== 'string') {
+    // Defensive: even though TS says string, guard against runtime misuse.
+    value = safeToString(value)
+  }
+  const ellipsis = '…'
+  // maxLen INCLUDES the ellipsis if truncation occurs.
+  const budget = Math.max(1, maxLen - ellipsis.length)
+  // Bound input scan to maxLen * 6 worst-case (each char up to \\uNNNN = 6).
   const inputCap = Math.min(value.length, maxLen * 6)
   const out: string[] = []
   let outLen = 0
 
   for (let i = 0; i < inputCap; i += 1) {
-    if (outLen >= maxLen) {
-      out.push('…')
-      return out.join('')
-    }
     const ch = value.charCodeAt(i)
     let chunk: string
     if ((ch >= 0x00 && ch <= 0x1f) || ch === 0x7f) {
       chunk = '\\x' + ch.toString(16).padStart(2, '0')
     } else if (ch === 0x2028 || ch === 0x2029) {
-      // Unicode line separators — some pipelines treat as newlines.
       chunk = '\\u' + ch.toString(16).padStart(4, '0')
     } else {
       chunk = value[i]!
     }
+    if (outLen + chunk.length > budget) {
+      // Won't fit — truncate with ellipsis, ensure total <= maxLen.
+      out.push(ellipsis)
+      return out.join('')
+    }
     out.push(chunk)
     outLen += chunk.length
   }
+  // If the input exceeded our scan budget, mark truncation.
   if (value.length > inputCap) {
-    out.push('…')
+    while (out.length > 0 && outLen + ellipsis.length > maxLen) {
+      const removed = out.pop()!
+      outLen -= removed.length
+    }
+    out.push(ellipsis)
   }
   return out.join('')
 }

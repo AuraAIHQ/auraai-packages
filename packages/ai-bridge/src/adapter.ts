@@ -140,6 +140,15 @@ export class AdapterError extends Error {
  */
 export function isAdapterError(value: unknown): value is AdapterError {
   if (!value || typeof value !== 'object') return false
+  // Cross-realm-safe error check: must be an Error-like object,
+  // not just any object with a `code` property.
+  // Object.prototype.toString.call works across realms where instanceof
+  // doesn't, and is more strict than checking for a `message` field
+  // (plain objects can have that too).
+  const isErrorLike =
+    Object.prototype.toString.call(value) === '[object Error]' ||
+    value instanceof Error
+  if (!isErrorLike) return false
   const v = value as { name?: unknown; code?: unknown; message?: unknown }
   if (typeof v.message !== 'string') return false
   if (typeof v.code !== 'string') return false

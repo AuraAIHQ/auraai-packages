@@ -53,8 +53,24 @@ const ADAPTER_SEMAPHORES = new WeakMap<Adapter, SemaphoreEntry>()
  * when arbitrary objects are passed dynamically. Throws BridgeError
  * with `invalid_adapter_metadata` on shape failure.
  */
-function validateMetadataShape(adapter: Adapter, indexHint: number): void {
-  const m = adapter.metadata as unknown
+function validateAdapterShape(adapter: Adapter, indexHint: number): void {
+  // Top-level adapter shape — TypeScript's interface check doesn't
+  // hold at runtime when a JS-authored adapter is passed.
+  if (!adapter || typeof adapter !== 'object') {
+    throw new BridgeError(
+      'invalid_adapter_metadata',
+      `adapters[${indexHint}] must be an object, got ${typeof adapter}`,
+    )
+  }
+  const a = adapter as { complete?: unknown; metadata?: unknown }
+  if (typeof a.complete !== 'function') {
+    throw new BridgeError(
+      'invalid_adapter_metadata',
+      `adapters[${indexHint}].complete must be a function, got ${typeof a.complete}`,
+    )
+  }
+  // Metadata shape:
+  const m = a.metadata as unknown
   const where = `adapters[${indexHint}].metadata`
   if (!m || typeof m !== 'object') {
     throw new BridgeError(
@@ -256,8 +272,8 @@ export function createBridge(options: BridgeOptions): Bridge {
   const adapterMap = new Map<string, Adapter>()
   for (let i = 0; i < options.adapters.length; i += 1) {
     const a = options.adapters[i]!
-    // Structural validation BEFORE using metadata fields.
-    validateMetadataShape(a, i)
+    // Structural validation BEFORE using any adapter fields.
+    validateAdapterShape(a, i)
 
     if (adapterMap.has(a.metadata.id)) {
       throw new BridgeError(
@@ -535,15 +551,15 @@ export function createBridge(options: BridgeOptions): Bridge {
  * errors from a different module copy still classify correctly.
  */
 function toAdapterError(error: unknown, adapterId: string): AdapterError {
+  // Always construct a fresh AdapterError — we MUST not return the
+  // input directly, even when it passes isAdapterError, because the
+  // structural guard accepts cross-realm/non-Error-prototype values.
+  // Wrapping ensures the thrown value is a real Error instance.
   if (isAdapterError(error)) {
-    // Preserve original instance via cause; the original stack/identity
-    // remains accessible for debugging. AdapterError messages from
-    // genuine adapters are trusted (they're produced by adapter code,
-    // not arbitrary remote payloads).
-    if (error.adapterId === adapterId && error.cause !== undefined) {
-      return error
-    }
-    return new AdapterError(error.code, error.message, adapterId, error)
+    // AdapterError messages can still be attacker-influenced (an
+    // adapter implementation may pass through a remote provider's
+    // error string verbatim). Sanitize before re-surfacing.
+    return new AdapterError(error.code, sanitizeForMessage(error.message), adapterId, error)
   }
   if (error instanceof Error) {
     // Error.message can contain attacker-controlled content (e.g., a
