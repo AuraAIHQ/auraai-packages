@@ -179,6 +179,15 @@ export interface AIHandle {
 /**
  * Memory handle scoped to this module. The kernel passes a namespace-
  * isolated child of the global memory store so modules cannot collide.
+ *
+ * **Permission semantics**: declaring `memory:read` and/or `memory:write`
+ * in `manifest.permissions` determines whether the kernel injects a
+ * handle at all. Once a module has a handle, it carries full read/write
+ * capability — the permission check happens at `load()` time (kernel
+ * verifies the declaration), not on individual method calls. A module
+ * declaring only `memory:read` still receives a full handle; the read-only
+ * constraint is a social/auditing convention enforced by the kernel in M2+,
+ * not a runtime restriction in M1.
  */
 export interface MemoryHandle {
   /** Read a value. Returns null when absent. */
@@ -193,11 +202,17 @@ export interface MemoryHandle {
    */
   has(key: string): boolean
   /**
-   * List keys, optionally filtered by prefix. Future versions will
-   * add `limit` and `offset` for pagination — for now the kernel
-   * may impose an internal cap (~10k entries) to bound resource use.
+   * List keys directly in this namespace, optionally filtered by prefix.
+   * Sub-namespace keys are excluded; use `namespace('child').list()`.
+   * Future versions will add `limit` and `offset` for pagination.
    */
   list(prefix?: string): string[]
+  /**
+   * Derive a child handle scoped under the given sub-namespace. Use
+   * this to isolate different logical domains within a single module
+   * (e.g. `memory.namespace('cache')` vs `memory.namespace('settings')`).
+   */
+  namespace(child: string): MemoryHandle
 }
 
 /**
@@ -331,5 +346,21 @@ export interface Module<
 export function defineModule<
   TIntent extends Intent<string, unknown> = Intent<string, unknown>,
 >(module: Module<TIntent>): Module<TIntent> {
+  const { manifest } = module
+  if (!manifest || typeof manifest !== 'object') {
+    throw new TypeError('defineModule: manifest is required')
+  }
+  if (typeof manifest.id !== 'string' || !manifest.id) {
+    throw new TypeError('defineModule: manifest.id must be a non-empty string')
+  }
+  if (typeof manifest.version !== 'string' || !manifest.version) {
+    throw new TypeError('defineModule: manifest.version must be a non-empty string')
+  }
+  if (typeof manifest.name !== 'string' || !manifest.name) {
+    throw new TypeError('defineModule: manifest.name must be a non-empty string')
+  }
+  if (typeof manifest.description !== 'string' || !manifest.description) {
+    throw new TypeError('defineModule: manifest.description must be a non-empty string')
+  }
   return module
 }

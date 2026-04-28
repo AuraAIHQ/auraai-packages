@@ -51,7 +51,7 @@ describe('@auraaihq/sdk module contract', () => {
         id: 'x',
         version: '0.0.0',
         name: 'X',
-        description: '',
+        description: 'smoke test module',
         permissions: [],
       },
       async load() {},
@@ -61,6 +61,34 @@ describe('@auraaihq/sdk module contract', () => {
       },
     })
     expect(mod.manifest.id).toBe('x')
+  })
+
+  describe('defineModule validates manifest fields at runtime', () => {
+    const base = {
+      async load() {},
+      async unload() {},
+      async invoke() { return { ok: true as const, data: null } },
+    }
+
+    it('throws when id is missing', () => {
+      expect(() => defineModule({ ...base, manifest: { id: '', version: '0.0.0', name: 'X', description: 'x', permissions: [] } }))
+        .toThrow(TypeError)
+    })
+
+    it('throws when version is missing', () => {
+      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '', name: 'X', description: 'x', permissions: [] } }))
+        .toThrow(TypeError)
+    })
+
+    it('throws when name is missing', () => {
+      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '0.0.0', name: '', description: 'x', permissions: [] } }))
+        .toThrow(TypeError)
+    })
+
+    it('throws when description is missing', () => {
+      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '0.0.0', name: 'X', description: '', permissions: [] } }))
+        .toThrow(TypeError)
+    })
   })
 
   it('lifecycle: load → invoke → unload', async () => {
@@ -133,7 +161,7 @@ describe('@auraaihq/sdk module contract', () => {
             id: 'l',
             version: '0.0.0',
             name: 'l',
-            description: '',
+            description: 'lifecycle test',
             permissions: [],
             lifecycle: lc,
           },
@@ -154,7 +182,7 @@ describe('@auraaihq/sdk module contract', () => {
           id: 'minimal',
           version: '0.0.1',
           name: 'Minimal',
-          description: '',
+          description: 'minimal module for testing optional fields',
           permissions: [],
         },
         async load() {},
@@ -184,7 +212,7 @@ describe('@auraaihq/sdk module contract', () => {
           id: 'publish',
           version: '0.1.0',
           name: 'Publish',
-          description: '',
+          description: 'publishes markdown to a blog',
           permissions: [],
           intents: ['publish', 'preview'],
         },
