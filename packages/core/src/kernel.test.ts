@@ -332,6 +332,20 @@ describe('@auraaihq/core kernel', () => {
       expect(result.loaded.sort()).toEqual(['a', 'c'])
       expect(result.failed.map((f) => f.id)).toEqual(['b'])
     })
+
+    it('skips downstream modules whose dependency failed, with clear error message', async () => {
+      kernel.register(
+        makeModule('lib', {
+          onLoad: () => { throw new Error('lib exploded') },
+        }),
+      )
+      kernel.register(makeModule('app', { deps: ['lib'] }))
+      const result = await kernel.loadAll({ continueOnError: true })
+      expect(result.loaded).toEqual([])
+      expect(result.failed.map((f) => f.id)).toEqual(['lib', 'app'])
+      const appFailure = result.failed.find((f) => f.id === 'app')
+      expect(appFailure?.error.message).toMatch(/dependency 'lib' failed/)
+    })
   })
 
   describe('invoke', () => {

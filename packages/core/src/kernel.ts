@@ -467,6 +467,7 @@ export function createKernel(options: KernelOptions): Kernel {
       const order = topoSort(records)
       const loaded: string[] = []
       const failed: { id: string; error: Error }[] = []
+      const failedIds = new Set<string>()
 
       for (const id of order) {
         // Skip already-loaded modules silently (saves duplicate work
@@ -476,12 +477,28 @@ export function createKernel(options: KernelOptions): Kernel {
           loaded.push(id)
           continue
         }
+
+        // Skip modules whose dependencies failed — avoids misleading
+        // errors where the root cause is the dependency, not this module.
+        const deps = r?.module.manifest.dependencies ?? []
+        const blockedBy = deps.find((dep) => failedIds.has(dep))
+        if (blockedBy) {
+          const err = new Error(
+            `skipped: dependency '${blockedBy}' failed to load`,
+          )
+          failed.push({ id, error: err })
+          failedIds.add(id)
+          if (!continueOnError) break
+          continue
+        }
+
         try {
           await kernel.load(id)
           loaded.push(id)
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error))
           failed.push({ id, error: err })
+          failedIds.add(id)
           if (!continueOnError) break
         }
       }
