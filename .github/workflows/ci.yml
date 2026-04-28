@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main, m0-foundation, m1-*, m2-*, m3-*]
+    branches: [main, m0-foundation, m1-*, m2-*, m3-*, m4-*, m5-*]
   pull_request:
-    branches: [main, m0-foundation, m1-*, m2-*, m3-*]
+    branches: [main, m0-foundation, m1-*, m2-*, m3-*, m4-*, m5-*]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -21,23 +24,23 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
         with:
           fetch-depth: 2  # for changeset detection on PRs
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa  # v4
         # Version comes from package.json packageManager field (pnpm@9.12.0).
         # Don't pass `version:` here to avoid ERR_PNPM_BAD_PM_VERSION conflicts.
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5
         with:
           node-version: '22'
           cache: 'pnpm'
 
       - name: Cache turbo build outputs
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: .turbo
           key: turbo-${{ runner.os }}-${{ github.sha }}
@@ -53,6 +56,9 @@ jobs:
       - name: Test
         run: pnpm test:turbo
 
+      - name: Coverage
+        run: pnpm test:coverage
+
   publish-hygiene:
     name: Publish hygiene
     runs-on: ubuntu-latest
@@ -61,11 +67,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
       - name: Verify private packages have no dist/ in git
         run: |
           set -e
+          shopt -s nullglob
           for pkg_json in packages/*/package.json community/*/package.json publishers/*/package.json scrapers/*/package.json idoris/*/package.json; do
             [ -f "$pkg_json" ] || continue
             pkg_dir=$(dirname "$pkg_json")
@@ -100,17 +107,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa  # v4
         # Version comes from package.json packageManager field (pnpm@9.12.0).
         # Don't pass `version:` here to avoid ERR_PNPM_BAD_PM_VERSION conflicts.
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -121,9 +128,9 @@ jobs:
       - name: Verify changeset exists for source changes
         run: |
           set -e
-          # Find changed files in this PR
-          BASE_REF="origin/${{ github.base_ref }}"
+          # Fetch base branch with minimal depth
           git fetch origin "${{ github.base_ref }}" --depth=1
+          BASE_REF="origin/${{ github.base_ref }}"
           CHANGED_FILES=$(git diff --name-only "$BASE_REF...HEAD")
 
           # If any source/config under packages/community/publishers/scrapers/idoris changed,

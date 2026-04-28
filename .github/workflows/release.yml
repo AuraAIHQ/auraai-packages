@@ -23,16 +23,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
         with:
           fetch-depth: 0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa  # v4
         # Version comes from package.json packageManager field.
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -45,7 +45,7 @@ jobs:
         run: pnpm build
 
       - name: Create Release Pull Request or Publish to npm
-        uses: changesets/action@v1
+        uses: changesets/action@aba318e9165b45630e7fcf83534e9410b7c23b1c  # v1.4.13
         with:
           # Run changeset version + commit OR publish if a versioning PR has been merged
           publish: pnpm release
