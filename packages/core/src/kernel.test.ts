@@ -417,12 +417,12 @@ describe('@auraaihq/core kernel', () => {
     })
 
     it('memory:read only — set/delete throw', async () => {
-      let capturedMem: ReturnType<typeof makeReadOnlyAccess> = null as unknown as ReturnType<typeof makeReadOnlyAccess>
+      let capturedMem: { get(k: string): unknown; set(k: string, v: unknown): void; delete(k: string): void } | undefined
       kernel.register(
         makeModule('readonly', {
           permissions: ['memory:read'],
           onLoad: (ctx) => {
-            capturedMem = makeReadOnlyAccess(ctx.memory!)
+            capturedMem = ctx.memory!
           },
         }),
       )
@@ -430,9 +430,9 @@ describe('@auraaihq/core kernel', () => {
       // Seed via the underlying namespaced memory (direct ':' keys
       // on root are now rejected to prevent collision footguns).
       memory.namespace('readonly').set('seed', 'hello')
-      expect(capturedMem.get('seed')).toBe('hello')
-      expect(() => capturedMem.set('x', 1)).toThrow(/memory:write/)
-      expect(() => capturedMem.delete('x')).toThrow(/memory:write/)
+      expect(capturedMem!.get('seed')).toBe('hello')
+      expect(() => capturedMem!.set('x', 1)).toThrow(/memory:write/)
+      expect(() => capturedMem!.delete('x')).toThrow(/memory:write/)
     })
 
     it('no memory permissions — ctx.memory is undefined', async () => {
@@ -566,7 +566,3 @@ describe('@auraaihq/core kernel', () => {
   })
 })
 
-// Helper: forwards memory handle methods so tests can assert each call.
-function makeReadOnlyAccess(handle: { get: (k: string) => unknown; set: (k: string, v: unknown) => void; delete: (k: string) => void }) {
-  return handle
-}

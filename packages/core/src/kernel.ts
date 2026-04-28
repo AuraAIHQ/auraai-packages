@@ -60,14 +60,15 @@ export interface KernelLogger {
  */
 export interface ModuleRecord {
   readonly module: Module
-  state: 'registered' | 'loading' | 'loaded' | 'unloading' | 'unloaded' | 'failed'
-  error?: Error
+  readonly state: 'registered' | 'loading' | 'loaded' | 'unloading' | 'unloaded' | 'failed'
+  readonly error?: Error
   /**
    * The ModuleContext built at load time, reused for every subsequent
    * invoke() per the SDK's "same ctx instance" contract. Cleared on
-   * unload.
+   * unload. Internal — not part of the public API surface.
+   * @internal
    */
-  context?: ModuleContext
+  readonly context?: ModuleContext
 }
 
 export interface KernelEvents {
@@ -217,6 +218,7 @@ function makeMemoryHandle(memory: Memory, permissions: readonly Permission[]): M
     set: write ? (key, value) => memory.set(key, value) : () => denyWrite('set'),
     delete: write ? (key) => memory.delete(key) : () => denyWrite('delete'),
     list: (prefix) => memory.list(prefix),
+    namespace: (child) => makeMemoryHandle(memory.namespace(child), permissions),
   }
 }
 
@@ -247,6 +249,19 @@ function buildContext(
   if (memPerms.read || memPerms.write) {
     const moduleMemory = options.memory.namespace(manifest.id)
     ctx.memory = makeMemoryHandle(moduleMemory, manifest.permissions)
+  }
+
+  // fs/net permissions are declared in the SDK but not yet enforced.
+  // Modules may still use Node.js APIs directly; this warning is the
+  // only guard until M2 adds sandbox/capability enforcement.
+  const hasUnenforced = manifest.permissions.some(
+    (p) => p === 'fs:read' || p === 'fs:write' || p === 'net',
+  )
+  if (hasUnenforced) {
+    moduleLog.warn(
+      "fs/net permissions declared but not enforced in M1 — " +
+        "modules may call Node.js APIs directly; sandbox enforcement is deferred to M2",
+    )
   }
 
   return ctx
@@ -313,13 +328,16 @@ function topoSort(records: Map<string, ModuleRecord>): string[] {
 
 export function createKernel(options: KernelOptions): Kernel {
   const log = options.log ?? defaultLogger
-  const records = new Map<string, ModuleRecord>()
+  // Internal records use Mutable<ModuleRecord> so the kernel can update
+  // state/error/context. list() exposes them as ReadonlyMap<string, ModuleRecord>
+  // so callers get compile-time readonly semantics without a copy allocation.
+  const records = new Map<string, Mutable<ModuleRecord>>()
   const loadOrder: string[] = []  // ids in the order they finished loading
 
   // Active in-flight load/unload promises, keyed by module id.
   // Concurrent callers for the same id share a promise — avoids
   // double-load races and re-entrancy bugs.
-  const inFlightLoads = new Map<string, Promise<ModuleRecord>>()
+  const inFlightLoads = new Map<string, Promise<Mutable<ModuleRecord>>>()
   const inFlightUnloads = new Map<string, Promise<void>>()
 
   // Shutdown flag — once set, new operations short-circuit.
@@ -353,7 +371,7 @@ export function createKernel(options: KernelOptions): Kernel {
         )
       }
 
-      records.set(id, { module, state: 'registered' })
+      records.set(id, { module, state: 'registered' } as Mutable<ModuleRecord>)
       log.debug(`registered module: ${id}`)
     },
 
@@ -362,9 +380,11 @@ export function createKernel(options: KernelOptions): Kernel {
     },
 
     list() {
-      // Cast to ReadonlyMap — callers can't mutate. Avoids per-call
-      // allocation that the previous `new Map(records)` did.
-      return records as ReadonlyMap<string, ModuleRecord>
+      // Expose internal map as ReadonlyMap<string, ModuleRecord>. Callers
+      // get compile-time readonly fields without a per-call copy. The cast
+      // is sound because Mutable<ModuleRecord> satisfies ModuleRecord's
+      // readonly-field contract from the caller's perspective.
+      return records as unknown as ReadonlyMap<string, ModuleRecord>
     },
 
     retry(id) {
@@ -396,7 +416,7 @@ export function createKernel(options: KernelOptions): Kernel {
       const existing = inFlightLoads.get(id)
       if (existing) return existing
 
-      const loadPromise = (async (): Promise<ModuleRecord> => {
+      const loadPromise = (async (): Promise<Mutable<ModuleRecord>> => {
         // Validate deps exist before doing anything else.
         const deps = record.module.manifest.dependencies ?? []
         for (const dep of deps) {
@@ -501,6 +521,11 @@ export function createKernel(options: KernelOptions): Kernel {
           const err = error instanceof Error ? error : new Error(String(error))
           record.state = 'failed'
           record.error = err
+          // Remove from loadOrder even on failure — otherwise a subsequent
+          // retry() + load() would add a second entry and cause double-unload
+          // during shutdown.
+          const idx = loadOrder.indexOf(id)
+          if (idx >= 0) loadOrder.splice(idx, 1)
           log.error(`failed to unload module '${id}':`, err)
           throw err
         }
