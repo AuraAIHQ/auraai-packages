@@ -2,13 +2,19 @@
 //
 // A `Module` is a unit of capability that the @auraaihq/core kernel
 // can load, query, invoke, and unload. Modules declare a manifest
-// describing their identity and required permissions, then implement
-// lifecycle hooks plus an `invoke` entry point.
+// describing their identity, what they need (permissions/deps), and
+// what they offer (intents), then implement lifecycle hooks plus an
+// `invoke` entry point.
 
 /**
  * Capability permissions a module may declare. The kernel grants
  * matching context access at load time. Unknown permissions are
  * rejected by the loader.
+ *
+ * `module:invoke:{id}` permits invoking a peer module by id. The
+ * kernel validates that the id is non-empty and that the target
+ * module exists; types here cannot enforce that — runtime check
+ * is mandatory.
  */
 export type Permission =
   | 'fs:read'
@@ -20,15 +26,46 @@ export type Permission =
   | `module:invoke:${string}`
 
 /**
- * Static metadata describing the module. Loaded before `load()` so the
- * kernel can verify version/dependencies/permissions and request user
- * authorization for sensitive scopes.
+ * Module lifecycle hint. The kernel uses this to schedule the module:
+ *
+ * - `persistent`: load once at app start, keep loaded until shutdown.
+ *   Use for tray-resident services, daemons, schedulers.
+ * - `on-demand`: load when first intent arrives, keep loaded for an
+ *   idle window (kernel-configured), then unload. Use for occasional
+ *   handlers like content publishers.
+ * - `ephemeral`: load → invoke once → unload immediately. Use for
+ *   short-lived one-shot tasks where state retention is undesired.
+ *
+ * Default is `on-demand` if omitted.
+ */
+export type ModuleLifecycle = 'persistent' | 'on-demand' | 'ephemeral'
+
+/**
+ * Static metadata describing the module. Loaded before `load()` so
+ * the kernel can verify version/dependencies/permissions and request
+ * user authorization for sensitive scopes.
+ *
+ * Runtime validation by the kernel/loader (NOT enforced by these
+ * types):
+ * - `id` must be non-empty kebab-case ([a-z0-9]+(-[a-z0-9]+)*) and
+ *   must NOT contain `:` (reserved as namespace separator)
+ * - `version` must be valid semver
+ * - `sdkVersion` must be valid semver range
+ * - `permissions` of form `module:invoke:{id}` — `{id}` validated
+ *   per the same rules as `id`
+ * - `dependencies` ids must exist + must not form cycles
  */
 export interface ModuleManifest {
   /** Globally unique ID, kebab-case (e.g. "publish-blog"). */
   id: string
-  /** Semver version of this module. */
+  /** Semver version of this module (e.g. "1.2.3"). */
   version: string
+  /**
+   * Semver range of `@auraaihq/sdk` this module was built against.
+   * The kernel rejects modules whose required range doesn't match
+   * its own SDK version. Omit to skip the check (NOT recommended).
+   */
+  sdkVersion?: string
   /** Human-readable name shown in the UI. */
   name: string
   /** One-sentence description. */
@@ -36,10 +73,24 @@ export interface ModuleManifest {
   /** Permissions this module needs to function. */
   permissions: readonly Permission[]
   /**
+   * Intent `kind` strings this module handles. The kernel uses this
+   * to build a routing table. Modules MUST handle exactly the kinds
+   * declared here — declaring more is wasted; declaring fewer than
+   * implemented means callers can't discover them.
+   *
+   * Kebab-case is recommended (e.g. ["publish", "schedule"]).
+   * Optional for backwards compatibility — but a module that omits
+   * this is invisible to intent routing and only callable via
+   * direct `module:invoke` references.
+   */
+  intents?: readonly string[]
+  /**
    * IDs of other modules this module depends on. The kernel guarantees
    * dependencies load first. Cycles are rejected at registration.
    */
   dependencies?: readonly string[]
+  /** Module lifecycle hint (default: `on-demand`). */
+  lifecycle?: ModuleLifecycle
 }
 
 /** Minimal logger surface; real kernel logger arrives in M2. */
@@ -51,15 +102,78 @@ export interface Logger {
 }
 
 /**
- * AI invocation handle. M1 placeholder — concrete shape decided in M2
- * once @auraaihq/ai-bridge lands.
+ * AI completion result with telemetry. Returned by
+ * `AIHandle.completeDetailed` when present.
+ */
+export interface AICompletionResult {
+  /** Generated text. */
+  text: string
+  /**
+   * Approximate token usage when known. Adapters that don't expose
+   * this still set the field for cost tracking, even if values are 0.
+   */
+  usage?: { promptTokens: number; completionTokens: number }
+  /** Adapter id that produced the result. */
+  adapterId?: string
+}
+
+/**
+ * AI invocation handle. M1 contract — concrete behaviour provided by
+ * @auraaihq/ai-bridge. M2 will add streaming + tool use.
  */
 export interface AIHandle {
   /**
-   * Generate a completion. Provider routing is the kernel's concern.
-   * Returns the assistant's text. M2 will add streaming + tool use.
+   * Generate a completion. Provider routing is the kernel/bridge's
+   * concern. Returns the assistant's text on success.
+   *
+   * On failure, throws either:
+   * - `AdapterError` (from `@auraaihq/ai-bridge`) with a stable `code`
+   *   like `'auth'`/`'invalid_request'`/`'aborted'`/`'unknown'` —
+   *   adapter-level failure that wasn't recoverable by trying another
+   *   adapter.
+   * - `BridgeError` (from `@auraaihq/ai-bridge`) for routing-level
+   *   failures, including:
+   *   - `'aggregate'` — every adapter in the chain failed (chain in
+   *     `cause` array)
+   *   - `'no_adapters'` — no adapters configured / policy returned []
+   *   - `'unknown_adapter'` — primary/fallback/policy referenced an id
+   *     not in the adapter set
+   *   - `'duplicate_in_order'` — routing order contains the same id twice
+   *   - `'policy_error'` — RoutingPolicy.pickOrder threw
+   *   - `'policy_invalid_return'` — pickOrder didn't return string[]
+   *   - `'invalid_adapter_metadata'` — adapter shape/metadata invalid
+   *     (caught at construction)
+   *
+   * Implementations MUST preserve the original error in `cause` so
+   * callers can drill in for debugging.
    */
-  complete(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<string>
+  complete(
+    prompt: string,
+    options?: {
+      /** Soft cap on output tokens. Adapters may clamp lower. */
+      maxTokens?: number
+      /** 0 = deterministic, 1 = creative. */
+      temperature?: number
+      /** Optional system prompt prepended to the request. */
+      system?: string
+      /** Cancel signal for in-flight requests. */
+      signal?: AbortSignal
+    },
+  ): Promise<string>
+  /**
+   * Like `complete` but returns the full result (text + usage +
+   * adapterId). Use for telemetry/cost tracking. Optional —
+   * implementations may omit this for legacy / minimal adapters.
+   */
+  completeDetailed?(
+    prompt: string,
+    options?: {
+      maxTokens?: number
+      temperature?: number
+      system?: string
+      signal?: AbortSignal
+    },
+  ): Promise<AICompletionResult>
 }
 
 /**
@@ -67,15 +181,37 @@ export interface AIHandle {
  * isolated child of the global memory store so modules cannot collide.
  */
 export interface MemoryHandle {
+  /** Read a value. Returns null when absent. */
   get<T = unknown>(key: string): T | null
+  /** Write any JSON-serializable value. */
   set(key: string, value: unknown): void
+  /** Remove a key. */
   delete(key: string): void
+  /**
+   * Check whether a key exists. Use to disambiguate "absent" from
+   * "stored as null".
+   */
+  has(key: string): boolean
+  /**
+   * List keys, optionally filtered by prefix. Future versions will
+   * add `limit` and `offset` for pagination — for now the kernel
+   * may impose an internal cap (~10k entries) to bound resource use.
+   */
   list(prefix?: string): string[]
 }
 
 /**
  * Runtime context provided to a module on `load()` and each `invoke()`.
- * The kernel constructs this based on the module's declared permissions.
+ *
+ * **Lifecycle**: the kernel passes the SAME `ModuleContext` instance
+ * to `load()` and to every subsequent `invoke()` for the lifetime of
+ * the loaded module. Modules MAY treat fields like `manifest` and
+ * `log` as stable references; do NOT close over a captured `ctx.ai`
+ * across `unload()`/`load()` cycles since the kernel may reconstruct
+ * them.
+ *
+ * Per-call request data (e.g., user id, request id) should travel in
+ * `Intent.payload`, not on `ctx`.
  */
 export interface ModuleContext {
   /** Module's own manifest (echoed for convenience). */
@@ -90,16 +226,31 @@ export interface ModuleContext {
 
 /**
  * An intent is the request a module receives via `invoke()`. The
- * `kind` is the routing key; payloads are typed per-module.
+ * `kind` is the routing key; payloads are typed per-kind.
+ *
+ * Specify both `TKind` and `TPayload` to get full type narrowing in
+ * `Module.invoke`:
+ *
+ * ```ts
+ * type PublishBlogIntent =
+ *   | Intent<'publish', { md: string; title: string }>
+ *   | Intent<'preview', { md: string }>
+ * ```
  */
-export interface Intent<TPayload = unknown> {
-  kind: string
+export interface Intent<TKind extends string = string, TPayload = unknown> {
+  kind: TKind
   payload: TPayload
 }
 
 /**
  * Result of an `invoke()`. Either succeeds with `data`, or fails with
- * an error code + message. M2 may add streaming / partial results.
+ * an error code + message.
+ *
+ * `code` is intentionally `string` rather than a closed union: modules
+ * define their own domain-specific codes. Recommended convention:
+ * `unknown_intent`, `invalid_payload`, `permission_denied`,
+ * `dependency_unavailable`, `internal_error`. The kernel may inject
+ * its own routing-level errors with prefixed codes (e.g. `kernel:*`).
  */
 export type Result<TData = unknown> =
   | { ok: true; data: TData }
@@ -107,60 +258,78 @@ export type Result<TData = unknown> =
 
 /**
  * The Module contract. Implementations are typically authored using
- * `defineModule({ manifest, ... })` for type inference.
+ * `defineModule(...)` for type inference.
+ *
+ * The generic `TIntent` lets a module narrow `invoke`'s `intent`
+ * parameter to its declared intent union — the compiler will warn
+ * if `manifest.intents` doesn't cover all the union's `kind` values.
  */
-export interface Module {
+export interface Module<
+  TIntent extends Intent<string, unknown> = Intent<string, unknown>,
+> {
   readonly manifest: ModuleManifest
 
   /**
    * Called once when the module is first loaded. Use to acquire
    * resources, register internal handlers, etc. The kernel passes a
-   * fresh `ModuleContext` whose lifetime matches this module's.
+   * fresh `ModuleContext` whose lifetime matches this module's; the
+   * SAME `ctx` reference will be passed to every subsequent `invoke()`.
    */
   load(ctx: ModuleContext): Promise<void>
 
   /**
    * Called once before the module is unloaded (uninstalled, app
-   * shutting down, version upgrade). Release any open resources.
+   * shutting down, version upgrade, idle eviction). Release any open
+   * resources.
    */
   unload(): Promise<void>
 
   /**
    * Process a single intent. The kernel routes intents based on `kind`
-   * and the manifest's declared capabilities. Modules MUST be
+   * matching `manifest.intents` (when declared). Modules MUST be
    * idempotent for retried intents that share the same logical
    * request id (the kernel will pass an `idempotencyKey` in M2+).
-   *
-   * Note: payload/data are intentionally `unknown` at the contract
-   * level — modules narrow internally based on `intent.kind`, and
-   * callers should validate the returned `data` shape per their needs.
-   * Generic helpers for typed intents are planned for v0.2.
    */
-  invoke(intent: Intent, ctx: ModuleContext): Promise<Result>
+  invoke(intent: TIntent, ctx: ModuleContext): Promise<Result>
 }
 
 /**
- * Helper for authoring modules with full type inference. The shape
- * is the same as implementing `Module` directly, but the helper makes
- * the manifest discoverable as a literal type.
+ * Helper for authoring modules with type inference. The generic flows
+ * through so manifest literal types are preserved and the `invoke`
+ * `intent` parameter can be narrowed by the module's declared union.
  *
  * @example
- * export default defineModule({
+ * type PublishIntent =
+ *   | Intent<'publish', { md: string }>
+ *   | Intent<'preview', { md: string }>
+ *
+ * export default defineModule<PublishIntent>({
  *   manifest: {
  *     id: 'publish-blog',
  *     version: '0.1.0',
+ *     sdkVersion: '^0.1.0',
  *     name: 'Blog Publisher',
  *     description: 'Publish markdown to a blog',
  *     permissions: ['fs:read', 'net', 'ai'],
+ *     intents: ['publish', 'preview'],
+ *     lifecycle: 'on-demand',
  *   },
  *   async load(ctx) { ctx.log.info('blog publisher ready') },
  *   async unload() {},
  *   async invoke(intent, ctx) {
- *     if (intent.kind === 'publish') return { ok: true, data: { url: '...' } }
- *     return { ok: false, error: { code: 'unknown_intent', message: intent.kind } }
+ *     if (intent.kind === 'publish') {
+ *       // intent.payload is narrowed to { md: string }
+ *       return { ok: true, data: { url: '...' } }
+ *     }
+ *     if (intent.kind === 'preview') {
+ *       return { ok: true, data: { html: '...' } }
+ *     }
+ *     return { ok: false, error: { code: 'unknown_intent', message: 'never' } }
  *   },
  * })
  */
-export function defineModule(module: Module): Module {
+export function defineModule<
+  TIntent extends Intent<string, unknown> = Intent<string, unknown>,
+>(module: Module<TIntent>): Module<TIntent> {
   return module
 }

@@ -9,12 +9,14 @@ export { VERSION } from './version'
 export {
   type Module,
   type ModuleManifest,
+  type ModuleLifecycle,
   type ModuleContext,
   type Intent,
   type Result,
   type Permission,
   type Logger,
   type AIHandle,
+  type AICompletionResult,
   type MemoryHandle,
   defineModule,
 } from './module'
