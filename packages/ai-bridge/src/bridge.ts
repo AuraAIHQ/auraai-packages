@@ -29,7 +29,7 @@ import {
   type Semaphore,
 } from './internal-utils'
 
-interface SemaphoreEntry {
+export interface SemaphoreEntry {
   sem: Semaphore
   /** The maxConcurrency value at first registration, for conflict detection. */
   max: number
@@ -142,6 +142,13 @@ export interface BridgeOptions {
   fallback?: readonly string[]
   /** Custom routing policy. Overrides primary/fallback if provided. */
   policy?: RoutingPolicy
+  /**
+   * Override the per-adapter semaphore registry. In production leave
+   * unset (uses the module-level WeakMap, shared across all bridges).
+   * In tests, pass `new WeakMap()` per test suite to prevent cross-test
+   * state pollution from the global registry.
+   */
+  semaphoreRegistry?: WeakMap<Adapter, SemaphoreEntry>
 }
 
 export interface Bridge extends AIHandle {
@@ -263,10 +270,37 @@ function abortedError(
   return new AdapterError('aborted', message, adapterId, reason)
 }
 
+function isNonNegativeInteger(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0
+}
+
+function sanitizeUsage(
+  usage: CompleteResult['usage'],
+  adapterId: string,
+): CompleteResult['usage'] {
+  if (usage === undefined) return undefined
+  const { promptTokens, completionTokens } = usage
+  if (isNonNegativeInteger(promptTokens) && isNonNegativeInteger(completionTokens)) {
+    return usage
+  }
+  // Adapter self-reported invalid usage — discard rather than propagate
+  // garbage into cost tracking. This is a bug in the adapter; warn loudly.
+  console.warn(
+    `[ai-bridge] adapter '${adapterId}' returned invalid usage ` +
+      `(promptTokens=${promptTokens}, completionTokens=${completionTokens}); ` +
+      'must be non-negative integers — discarding usage',
+  )
+  return undefined
+}
+
 export function createBridge(options: BridgeOptions): Bridge {
   if (options.adapters.length === 0) {
     throw new BridgeError('no_adapters', 'createBridge requires at least one adapter')
   }
+
+  // Use injected registry in tests to avoid cross-test state from the
+  // module-level global WeakMap. Production callers leave it unset.
+  const semaphores = options.semaphoreRegistry ?? ADAPTER_SEMAPHORES
 
   // Build the registry first.
   const adapterMap = new Map<string, Adapter>()
@@ -292,8 +326,8 @@ export function createBridge(options: BridgeOptions): Bridge {
     // Drift detection: if a previous bridge registered this adapter
     // with maxConcurrency set but now it's undefined, surface it
     // rather than silently letting the old limiter apply.
-    if (max === undefined && ADAPTER_SEMAPHORES.has(a)) {
-      const existing = ADAPTER_SEMAPHORES.get(a)!
+    if (max === undefined && semaphores.has(a)) {
+      const existing = semaphores.get(a)!
       throw new BridgeError(
         'invalid_adapter_metadata',
         `adapter '${sanitizeForMessage(a.metadata.id)}' was previously registered with maxConcurrency=${existing.max} but is now undefined; refusing to silently keep stale limiter`,
@@ -316,7 +350,7 @@ export function createBridge(options: BridgeOptions): Bridge {
       // with another bridge that picked a different maxConcurrency,
       // reject. Silently using stale config would be a footgun —
       // surfacing the drift lets the developer reconcile.
-      const existing = ADAPTER_SEMAPHORES.get(a)
+      const existing = semaphores.get(a)
       if (existing) {
         if (existing.max !== normalized) {
           throw new BridgeError(
@@ -326,7 +360,7 @@ export function createBridge(options: BridgeOptions): Bridge {
         }
         // Same value — reuse existing semaphore.
       } else {
-        ADAPTER_SEMAPHORES.set(a, { sem: createSemaphore(normalized), max: normalized })
+        semaphores.set(a, { sem: createSemaphore(normalized), max: normalized })
       }
     }
   }
@@ -372,8 +406,11 @@ export function createBridge(options: BridgeOptions): Bridge {
     prompt: string,
     options: CompleteOptions | undefined,
   ): Promise<CompleteResult> {
-    const entry = ADAPTER_SEMAPHORES.get(adapter)
-    if (!entry) return adapter.complete(prompt, options)
+    const entry = semaphores.get(adapter)
+    if (!entry) {
+      const result = await adapter.complete(prompt, options)
+      return { ...result, usage: sanitizeUsage(result.usage, adapter.metadata.id) }
+    }
 
     let release: () => void
     try {
@@ -401,7 +438,11 @@ export function createBridge(options: BridgeOptions): Bridge {
           options.signal.reason,
         )
       }
-      return await adapter.complete(prompt, options)
+      const result = await adapter.complete(prompt, options)
+      return {
+        ...result,
+        usage: sanitizeUsage(result.usage, adapter.metadata.id),
+      }
     } finally {
       release()
     }

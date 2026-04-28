@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createBridge, BridgeError } from './bridge'
+import { createBridge, BridgeError, type SemaphoreEntry } from './bridge'
 import { createInProcessAdapter } from './in-process-adapter'
-import { AdapterError, isAdapterError, type AdapterErrorCode } from './adapter'
+import { AdapterError, isAdapterError, type AdapterErrorCode, type Adapter } from './adapter'
 
 describe('@auraaihq/ai-bridge', () => {
   describe('createBridge', () => {
@@ -1194,5 +1194,75 @@ describe('@auraaihq/ai-bridge in-process adapter', () => {
     const err = await a.complete('hi', { signal: ctrl.signal }).catch((e) => e)
     expect(err).toBeInstanceOf(AdapterError)
     expect(err.code).toBe('aborted')
+  })
+
+  describe('semaphoreRegistry injection (C2 fix)', () => {
+    it('uses injected registry instead of module-level global', async () => {
+      const registry = new WeakMap<Adapter, SemaphoreEntry>()
+      const a = createInProcessAdapter({ id: 'a', metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number; id: string; name: string; provider: string; local: boolean }> })
+      const bridge = createBridge({ adapters: [a], semaphoreRegistry: registry })
+      const result = await bridge.complete('hi')
+      expect(result).toBeTruthy()
+      // Registry was populated for the adapter
+      expect(registry.has(a)).toBe(true)
+    })
+
+    it('two bridges with same adapter + different maxConcurrency do NOT conflict via injected registries', () => {
+      const r1 = new WeakMap<Adapter, SemaphoreEntry>()
+      const r2 = new WeakMap<Adapter, SemaphoreEntry>()
+      const a = createInProcessAdapter({ id: 'shared', metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number; id: string; name: string; provider: string; local: boolean }> })
+      const a2 = createInProcessAdapter({ id: 'shared', metadata: { maxConcurrency: 2 } as Partial<{ maxConcurrency: number; id: string; name: string; provider: string; local: boolean }> })
+      // Different registries — no conflict even though same adapter id
+      expect(() => createBridge({ adapters: [a], semaphoreRegistry: r1 })).not.toThrow()
+      expect(() => createBridge({ adapters: [a2], semaphoreRegistry: r2 })).not.toThrow()
+    })
+  })
+
+  describe('usage field validation (H2 fix)', () => {
+    function makeUsageAdapter(id: string, usage: { promptTokens: unknown; completionTokens: unknown }): Adapter {
+      return {
+        metadata: { id, name: id, provider: 'test', local: true },
+        async complete() {
+          return { text: 'ok', usage: usage as { promptTokens: number; completionTokens: number } }
+        },
+      }
+    }
+
+    it('passes through valid usage', async () => {
+      const a = makeUsageAdapter('valid', { promptTokens: 10, completionTokens: 5 })
+      const bridge = createBridge({ adapters: [a], semaphoreRegistry: new WeakMap() })
+      const result = await bridge.completeDetailed('hi')
+      expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 5 })
+    })
+
+    it('discards usage with negative values and warns', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const a = makeUsageAdapter('bad-neg', { promptTokens: -1, completionTokens: 5 })
+      const bridge = createBridge({ adapters: [a], semaphoreRegistry: new WeakMap() })
+      const result = await bridge.completeDetailed('hi')
+      expect(result.usage).toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('invalid usage'))
+      warnSpy.mockRestore()
+    })
+
+    it('discards usage with NaN values and warns', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const a = makeUsageAdapter('bad-nan', { promptTokens: NaN, completionTokens: 0 })
+      const bridge = createBridge({ adapters: [a], semaphoreRegistry: new WeakMap() })
+      const result = await bridge.completeDetailed('hi')
+      expect(result.usage).toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('invalid usage'))
+      warnSpy.mockRestore()
+    })
+
+    it('discards usage when undefined — passthrough', async () => {
+      const a: Adapter = {
+        metadata: { id: 'no-usage', name: 'no-usage', provider: 'test', local: true },
+        async complete() { return { text: 'ok' } },
+      }
+      const bridge = createBridge({ adapters: [a], semaphoreRegistry: new WeakMap() })
+      const result = await bridge.completeDetailed('hi')
+      expect(result.usage).toBeUndefined()
+    })
   })
 })
