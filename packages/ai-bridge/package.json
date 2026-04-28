@@ -1,8 +1,8 @@
 {
-  "name": "@auraaihq/sdk",
+  "name": "@auraaihq/ai-bridge",
   "version": "0.0.0",
   "private": true,
-  "description": "Public SDK for Agent24-Desktop module developers — types, helpers, lifecycle hooks",
+  "description": "AI Layer router for Agent24 — selects between adapters (idoris/claude/openai/local) based on policy + falls back on failure",
   "license": "MIT",
   "type": "module",
   "main": "src/index.ts",
@@ -19,11 +19,15 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "echo 'build TBD (M1) — when implemented, use: tsc -p tsconfig.build.json'",
+    "build": "echo 'build TBD (M1 next iteration) — when implemented, use: tsc -p tsconfig.build.json'",
     "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
+  "peerDependencies": {
+    "@auraaihq/sdk": "workspace:*"
+  },
   "devDependencies": {
+    "@auraaihq/sdk": "workspace:*",
     "@types/node": "^22.0.0",
     "vitest": "^4.1.5"
   },
