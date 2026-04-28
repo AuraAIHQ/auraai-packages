@@ -34,19 +34,55 @@ export interface Memory {
   /** Remove a key. No-op if the key is absent. */
   delete(key: string): void
   /**
+   * Check whether a key exists. Use this to disambiguate "absent"
+   * from "stored as null", since `get` returns `null` in both cases.
+   */
+  has(key: string): boolean
+  /**
    * List keys in this namespace. If `prefix` is provided, returns only
    * keys starting with `prefix` (the prefix itself is matched against
    * the key portion, not the namespaced storage row).
+   *
+   * If `prefix` is omitted or empty, returns all keys in the current
+   * namespace.
    */
   list(prefix?: string): string[]
   /**
    * Derive a child memory scoped under the given sub-namespace. The
    * resulting full namespace is `{parent}:{child}` when the parent has
    * a namespace, otherwise just `{child}`.
+   *
+   * Children share the parent's database connection. Calling `close()`
+   * on a child is a no-op; only the owner's `close()` actually
+   * releases the connection. After the owner closes, child operations
+   * will throw — see `close()` for ownership semantics.
    */
   namespace(child: string): Memory
-  /** Close the underlying database connection. */
+  /**
+   * Close the underlying database connection. Only the original owner
+   * (returned by `createMemory`) actually closes; child memories
+   * created via `namespace()` are no-ops.
+   *
+   * **Ownership warning**: after the owner closes, any operation on a
+   * child memory throws an error. Prefer to derive children only
+   * within the owner's lifetime.
+   */
   close(): void
+}
+
+/**
+ * Thrown when stored data fails to parse — usually means the database
+ * was corrupted or written by a different schema/serializer.
+ */
+export class MemoryCorruptionError extends Error {
+  constructor(
+    public readonly key: string,
+    message: string,
+    cause?: unknown,
+  ) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = 'MemoryCorruptionError'
+  }
 }
 
 interface MemoryRow {
@@ -78,6 +114,9 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
   const getStmt = db.prepare<[string], MemoryRow>(
     'SELECT value FROM memory_kv WHERE ns_key = ?',
   )
+  const hasStmt = db.prepare<[string]>(
+    'SELECT 1 FROM memory_kv WHERE ns_key = ?',
+  )
   const setStmt = db.prepare<[string, string]>(
     'INSERT INTO memory_kv (ns_key, value) VALUES (?, ?) ' +
       'ON CONFLICT(ns_key) DO UPDATE SET value = excluded.value',
@@ -98,26 +137,59 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
 
   const decodePrefix = namespace ? `${namespace}${NAMESPACE_SEPARATOR}` : ''
 
+  // Guard: every public method must run on an open connection. Children
+  // share the parent's `db`, so when the owner closes, the connection
+  // is gone and children get a clear error rather than a cryptic
+  // "database is closed" from better-sqlite3 deep in a prepared
+  // statement.
+  const assertDbOpen = (): void => {
+    if (!db.open) {
+      throw new Error(
+        'memory: database connection is closed; ' +
+          'this is usually because the owner Memory.close() was called ' +
+          'before this child memory operation',
+      )
+    }
+  }
+
   const memory: Memory = {
     get<T = unknown>(key: string): T | null {
+      assertDbOpen()
       validateKey(key)
       const row = getStmt.get(fullKey(key))
       if (!row) return null
-      return JSON.parse(row.value) as T
+      try {
+        return JSON.parse(row.value) as T
+      } catch (error) {
+        throw new MemoryCorruptionError(
+          key,
+          `failed to parse stored JSON for key '${key}'`,
+          error,
+        )
+      }
+    },
+
+    has(key: string): boolean {
+      assertDbOpen()
+      validateKey(key)
+      return hasStmt.get(fullKey(key)) !== undefined
     },
 
     set(key: string, value: unknown): void {
+      assertDbOpen()
       validateKey(key)
       const serialized = serializeValue(value)
       setStmt.run(fullKey(key), serialized)
     },
 
     delete(key: string): void {
+      assertDbOpen()
       validateKey(key)
       deleteStmt.run(fullKey(key))
     },
 
     list(prefix?: string): string[] {
+      assertDbOpen()
       const userPrefix = prefix ?? ''
       const pattern = `${escapeLike(decodePrefix)}${escapeLike(userPrefix)}%`
       const rows = listStmt.all(pattern)
@@ -126,6 +198,7 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
     },
 
     namespace(child: string): Memory {
+      assertDbOpen()
       validateNamespacePart(child)
       // Children share the same db connection; closing them does NOT
       // close the parent. Only the owning Memory closes the db.
@@ -134,7 +207,7 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
 
     close(): void {
       if (owned) {
-        db.close()
+        if (db.open) db.close()
       }
       // child memories ignore close() — only the owner closes
     },
@@ -146,6 +219,15 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
 function validateKey(key: string): void {
   if (typeof key !== 'string' || key.length === 0) {
     throw new TypeError('memory key must be a non-empty string')
+  }
+  // Reject the namespace separator. Without this, a key like
+  // 'foo:bar' set on the root would collide with the sub-key 'bar'
+  // in the 'foo' child namespace — silently breaking namespace
+  // isolation.
+  if (key.includes(NAMESPACE_SEPARATOR)) {
+    throw new TypeError(
+      `memory key must not contain '${NAMESPACE_SEPARATOR}' (reserved as namespace separator); got: '${key}'`,
+    )
   }
 }
 
@@ -186,6 +268,16 @@ function serializeValue(value: unknown): string {
  * sub.list()                       // ['private']
  * mem.list()                       // ['foo', 'module-x:private']
  * mem.close()
+ *
+ * @remarks
+ * - Encryption-at-rest is NOT provided. For sensitive data, encrypt
+ *   values at the application layer or run on an encrypted volume.
+ * - Schema migration is not handled here; if the schema changes in a
+ *   future version, callers must migrate manually or via a separate
+ *   tool.
+ * - The `get<T>()` generic is a TypeScript-only convenience: there is
+ *   no runtime check that the stored value matches `T`. Validate
+ *   shapes at the caller site if correctness matters.
  */
 export function createMemory(options: MemoryOptions): Memory {
   const { filename, namespace = '' } = options
@@ -196,9 +288,18 @@ export function createMemory(options: MemoryOptions): Memory {
     validateNamespacePart(namespace)
   }
   const db = new Database(filename)
-  // WAL mode improves concurrent reads; safe for our single-process usage.
-  db.pragma('journal_mode = WAL')
-  db.pragma('synchronous = NORMAL')
+
+  // WAL improves concurrent reads on file-backed databases. It has no
+  // effect on `:memory:` and would just be wasted pragmas.
+  if (filename !== ':memory:') {
+    db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = NORMAL')
+  }
+  // busy_timeout retries SQLITE_BUSY internally instead of failing
+  // immediately. Helps in multi-process / heavy contention scenarios.
+  // 5s is the typical conservative default.
+  db.pragma('busy_timeout = 5000')
+
   ensureSchema(db)
   return makeMemory(db, namespace, /* owned */ true)
 }
