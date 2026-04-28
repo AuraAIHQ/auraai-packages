@@ -17,7 +17,7 @@
     "test:turbo": "turbo run test",
     "bench": "vitest bench",
     "typecheck": "turbo run typecheck",
-    "clean": "turbo run clean && rm -rf node_modules/.cache",
+    "clean": "turbo run clean && rm -rf .turbo",
     "changeset": "changeset",
     "version": "changeset version",
     "release": "changeset publish"
