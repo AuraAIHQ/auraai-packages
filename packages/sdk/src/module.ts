@@ -63,7 +63,12 @@ export interface ModuleManifest {
   /**
    * Semver range of `@auraaihq/sdk` this module was built against.
    * The kernel rejects modules whose required range doesn't match
-   * its own SDK version. Omit to skip the check (NOT recommended).
+   * its own SDK version.
+   *
+   * **Omitting this field disables all SDK compatibility checks.**
+   * Your module may silently break when the SDK evolves. This field
+   * will become required in a future minor release — omit only during
+   * early prototyping, never in published modules.
    */
   sdkVersion?: string
   /** Human-readable name shown in the UI. */
@@ -118,6 +123,37 @@ export interface AICompletionResult {
 }
 
 /**
+ * Stable error codes that `AdapterError` (from `@auraaihq/ai-bridge`) may
+ * carry. Defined here so SDK consumers can reference them without a direct
+ * `ai-bridge` dependency; `ai-bridge` MUST use these exact strings.
+ */
+export type AdapterErrorCode =
+  | 'auth'
+  | 'rate_limit'
+  | 'context_overflow'
+  | 'timeout'
+  | 'network'
+  | 'invalid_request'
+  | 'aborted'
+  | 'unknown'
+
+/**
+ * Stable error codes that `BridgeError` (from `@auraaihq/ai-bridge`) may
+ * carry for routing-level failures. Defined here so SDK consumers can
+ * reference them without a direct `ai-bridge` dependency; `ai-bridge`
+ * MUST use these exact strings.
+ */
+export type BridgeErrorCode =
+  | 'aggregate'
+  | 'no_adapters'
+  | 'unknown_adapter'
+  | 'duplicate_in_order'
+  | 'policy_error'
+  | 'policy_invalid_return'
+  | 'invalid_adapter_metadata'
+  | 'unsupported_method'
+
+/**
  * AI invocation handle. M1 contract — concrete behaviour provided by
  * @auraaihq/ai-bridge. M2 will add streaming + tool use.
  */
@@ -127,22 +163,12 @@ export interface AIHandle {
    * concern. Returns the assistant's text on success.
    *
    * On failure, throws either:
-   * - `AdapterError` (from `@auraaihq/ai-bridge`) with a stable `code`
-   *   like `'auth'`/`'invalid_request'`/`'aborted'`/`'unknown'` —
-   *   adapter-level failure that wasn't recoverable by trying another
-   *   adapter.
-   * - `BridgeError` (from `@auraaihq/ai-bridge`) for routing-level
-   *   failures, including:
-   *   - `'aggregate'` — every adapter in the chain failed (chain in
-   *     `cause` array)
-   *   - `'no_adapters'` — no adapters configured / policy returned []
-   *   - `'unknown_adapter'` — primary/fallback/policy referenced an id
-   *     not in the adapter set
-   *   - `'duplicate_in_order'` — routing order contains the same id twice
-   *   - `'policy_error'` — RoutingPolicy.pickOrder threw
-   *   - `'policy_invalid_return'` — pickOrder didn't return string[]
-   *   - `'invalid_adapter_metadata'` — adapter shape/metadata invalid
-   *     (caught at construction)
+   * - `AdapterError` (from `@auraaihq/ai-bridge`) with a `code` of
+   *   type {@link AdapterErrorCode} — adapter-level failure that wasn't
+   *   recoverable by trying another adapter.
+   * - `BridgeError` (from `@auraaihq/ai-bridge`) with a `code` of
+   *   type {@link BridgeErrorCode} — routing-level failure (no adapters,
+   *   all adapters failed, policy error, etc.).
    *
    * Implementations MUST preserve the original error in `cause` so
    * callers can drill in for debugging.
@@ -304,6 +330,13 @@ export interface Module<
    * matching `manifest.intents` (when declared). Modules MUST be
    * idempotent for retried intents that share the same logical
    * request id (the kernel will pass an `idempotencyKey` in M2+).
+   *
+   * **Known limitation (M1)**: the return type is `Promise<Result>` i.e.
+   * `Result<unknown>`. The kernel has no static knowledge of each module's
+   * result shape — only the *calling* module does. Callers that need typed
+   * data should narrow `result.ok` then type-assert, or define a shared
+   * type contract imported by both sides. A typed intent-routing layer
+   * (M2) will address this by coupling intent `kind` to result shapes.
    */
   invoke(intent: TIntent, ctx: ModuleContext): Promise<Result>
 }
