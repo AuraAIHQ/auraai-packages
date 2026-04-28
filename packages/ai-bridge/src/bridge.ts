@@ -125,6 +125,16 @@ export function createBridge(options: BridgeOptions): Bridge {
   ): Promise<CompleteResult> {
     const errors: AdapterError[] = []
     for (const id of order) {
+      // Honor abort between adapters as well as inside them. If the
+      // user aborted after the primary call returned, we shouldn't
+      // start the fallback.
+      if (completeOptions?.signal?.aborted) {
+        throw new AdapterError(
+          'aborted',
+          'request aborted before next adapter',
+          id,
+        )
+      }
       const adapter = adapterMap.get(id)
       if (!adapter) {
         // Unknown id from a policy is a programming bug — fail loud.
@@ -162,9 +172,20 @@ export function createBridge(options: BridgeOptions): Bridge {
     },
 
     async complete(prompt, options) {
-      const order = policy
-        ? policy.pickOrder(prompt, options, [...adapterMap.keys()])
-        : defaultOrder
+      let order: readonly string[]
+      if (policy) {
+        try {
+          order = policy.pickOrder(prompt, options, [...adapterMap.keys()])
+        } catch (error) {
+          throw new BridgeError(
+            'unsupported_method',
+            `routing policy threw: ${error instanceof Error ? error.message : String(error)}`,
+            error,
+          )
+        }
+      } else {
+        order = defaultOrder
+      }
       if (order.length === 0) {
         throw new BridgeError('no_adapters', 'routing policy returned empty order')
       }

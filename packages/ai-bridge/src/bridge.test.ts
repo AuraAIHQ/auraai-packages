@@ -241,6 +241,85 @@ describe('@auraaihq/ai-bridge', () => {
       ctrl.abort()
       await expect(promise).rejects.toMatchObject({ code: 'aborted' })
     })
+
+    it('honors abort between adapters in the fallback chain', async () => {
+      const ctrl = new AbortController()
+      let primaryCalls = 0
+      let fallbackCalls = 0
+      const bridge = createBridge({
+        adapters: [
+          createDummyAdapter({
+            id: 'a',
+            respond: () => {
+              primaryCalls += 1
+              // Trigger abort right when primary fails retryable.
+              ctrl.abort()
+              throw new AdapterError('rate_limit', 'rate limited', 'a')
+            },
+          }),
+          createDummyAdapter({
+            id: 'b',
+            respond: () => {
+              fallbackCalls += 1
+              return 'b'
+            },
+          }),
+        ],
+        primary: 'a',
+        fallback: ['b'],
+      })
+      await expect(bridge.complete('hi', { signal: ctrl.signal })).rejects.toMatchObject({
+        code: 'aborted',
+      })
+      expect(primaryCalls).toBe(1)
+      // Fallback should NOT have run because the bridge checked the
+      // signal between adapters and threw.
+      expect(fallbackCalls).toBe(0)
+    })
+  })
+
+  describe('non-Error throws from adapter', () => {
+    it.each([
+      ['string', 'literal error'],
+      ['null', null],
+      ['undefined', undefined],
+      ['object', { weird: 'shape' }],
+      ['number', 42],
+    ] as const)('classifies "%s" as unknown AdapterError', async (_label, thrown) => {
+      const bridge = createBridge({
+        adapters: [
+          createDummyAdapter({
+            id: 'a',
+            respond: () => {
+              // Adapter authors might `throw` arbitrary values; bridge
+              // must classify them robustly.
+              throw thrown
+            },
+          }),
+        ],
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(AdapterError)
+      expect(err.code).toBe('unknown')
+      expect(err.adapterId).toBe('a')
+    })
+  })
+
+  describe('policy synchronous throw', () => {
+    it('wraps thrown policy error in BridgeError', async () => {
+      const bridge = createBridge({
+        adapters: [createDummyAdapter({ id: 'a', text: 'a' })],
+        policy: {
+          pickOrder: () => {
+            throw new Error('policy bug')
+          },
+        },
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(BridgeError)
+      expect(err.code).toBe('unsupported_method')
+      expect(err.message).toContain('policy bug')
+    })
   })
 
   describe('introspection', () => {
