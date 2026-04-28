@@ -32,6 +32,14 @@ const defaultMetadata: AdapterMetadata = {
   local: true,
 }
 
+function abortedFromSignal(
+  signal: AbortSignal | undefined,
+  message: string,
+  adapterId: string,
+): AdapterError {
+  return new AdapterError('aborted', message, adapterId, signal?.reason)
+}
+
 /**
  * Sleep for `ms`, rejecting early on abort. Always cleans up the
  * timer + abort listener — no leaks even on the success path.
@@ -44,7 +52,7 @@ const defaultMetadata: AdapterMetadata = {
  */
 function abortableDelay(ms: number, signal: AbortSignal | undefined, adapterId: string): Promise<void> {
   if (signal?.aborted) {
-    return Promise.reject(new AdapterError('aborted', 'aborted before delay started', adapterId))
+    return Promise.reject(abortedFromSignal(signal, 'aborted before delay started', adapterId))
   }
   return new Promise<void>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -57,7 +65,7 @@ function abortableDelay(ms: number, signal: AbortSignal | undefined, adapterId: 
     }
     const onAbort = (): void => {
       cleanup()
-      reject(new AdapterError('aborted', 'aborted by signal', adapterId))
+      reject(abortedFromSignal(signal, 'aborted by signal', adapterId))
     }
 
     // Attach listener FIRST so any abort during construction is caught.
@@ -92,7 +100,11 @@ export function createDummyAdapter(options: DummyAdapterOptions = {}): Adapter {
     async complete(prompt, completeOptions): Promise<CompleteResult> {
       // Pre-check abort — don't even start latency timer if already aborted.
       if (completeOptions?.signal?.aborted) {
-        throw new AdapterError('aborted', 'aborted before completion', metadata.id)
+        throw abortedFromSignal(
+          completeOptions.signal,
+          'aborted before completion',
+          metadata.id,
+        )
       }
 
       if (options.latencyMs && options.latencyMs > 0) {
@@ -101,7 +113,11 @@ export function createDummyAdapter(options: DummyAdapterOptions = {}): Adapter {
 
       // Re-check after delay — could have been aborted during.
       if (completeOptions?.signal?.aborted) {
-        throw new AdapterError('aborted', 'aborted after delay', metadata.id)
+        throw abortedFromSignal(
+          completeOptions.signal,
+          'aborted after delay',
+          metadata.id,
+        )
       }
 
       if (options.throwCode) {

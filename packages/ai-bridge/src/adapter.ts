@@ -28,6 +28,14 @@ export interface AdapterMetadata {
   readonly provider: ProviderFamily
   /** Whether this adapter runs entirely on-device (no network). */
   readonly local: boolean
+  /**
+   * Maximum number of concurrent `complete()` calls the bridge will
+   * dispatch to this adapter. Adapters backed by single-session model
+   * runners (e.g., llama.cpp bindings) MUST set this to `1` to prevent
+   * deadlock or corrupted output under parallel callers. Default
+   * (omitted) is unlimited concurrency. Values < 1 are treated as 1.
+   */
+  readonly maxConcurrency?: number
 }
 
 export interface CompleteOptions {

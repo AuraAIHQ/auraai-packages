@@ -402,6 +402,207 @@ describe('@auraaihq/ai-bridge', () => {
     })
   })
 
+  describe('post-completion abort enforcement', () => {
+    it('treats result as aborted if signal aborted during adapter run', async () => {
+      // Simulate an adapter that ignores the signal (common for sync
+      // local libs) — returns success even after caller cancelled.
+      const ctrl = new AbortController()
+      const bridge = createBridge({
+        adapters: [
+          createDummyAdapter({
+            id: 'ignores-signal',
+            respond: () => {
+              ctrl.abort()  // caller cancels mid-request
+              return 'should-be-discarded'
+            },
+          }),
+        ],
+      })
+      const err = await bridge.complete('hi', { signal: ctrl.signal }).catch((e) => e)
+      expect(err).toBeInstanceOf(AdapterError)
+      expect(err.code).toBe('aborted')
+      expect(err.adapterId).toBe('ignores-signal')
+    })
+  })
+
+  describe('AbortSignal.reason preservation', () => {
+    it('passes signal.reason as cause when aborting before routing', async () => {
+      const bridge = createBridge({
+        adapters: [createDummyAdapter({ id: 'a', text: 'x' })],
+      })
+      const reason = new Error('user cancelled')
+      const ctrl = new AbortController()
+      ctrl.abort(reason)
+      const err = await bridge.complete('hi', { signal: ctrl.signal }).catch((e) => e)
+      expect(err).toBeInstanceOf(AdapterError)
+      expect(err.code).toBe('aborted')
+      expect(err.cause).toBe(reason)
+    })
+
+    it('passes signal.reason when aborted between adapters', async () => {
+      const ctrl = new AbortController()
+      const reason = new Error('mid-flight cancel')
+      const bridge = createBridge({
+        adapters: [
+          createDummyAdapter({
+            id: 'a',
+            respond: () => {
+              ctrl.abort(reason)
+              throw new AdapterError('rate_limit', 'rl', 'a')
+            },
+          }),
+          createDummyAdapter({ id: 'b', text: 'never' }),
+        ],
+        primary: 'a',
+        fallback: ['b'],
+      })
+      const err = await bridge.complete('hi', { signal: ctrl.signal }).catch((e) => e)
+      expect(err.code).toBe('aborted')
+      expect(err.cause).toBe(reason)
+    })
+  })
+
+  describe('per-adapter concurrency limit', () => {
+    it('serializes calls for adapter with maxConcurrency=1', async () => {
+      let inFlight = 0
+      let observedMax = 0
+      const releases: Array<() => void> = []
+      const slowResolve = (): Promise<string> => {
+        inFlight += 1
+        observedMax = Math.max(observedMax, inFlight)
+        return new Promise<string>((resolve) => {
+          releases.push(() => {
+            inFlight -= 1
+            resolve('done')
+          })
+        })
+      }
+      const adapter = createDummyAdapter({
+        id: 'serial',
+        respond: slowResolve,
+        metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number }> & Partial<{ id: string; name: string; provider: string; local: boolean }>,
+      })
+      // Override metadata to set maxConcurrency=1 (createDummyAdapter
+      // accepts metadata partial overrides).
+      // (NB: createDummyAdapter spreads defaults + metadata; this works.)
+      const bridge = createBridge({ adapters: [adapter] })
+
+      const p1 = bridge.complete('a')
+      const p2 = bridge.complete('b')
+      const p3 = bridge.complete('c')
+
+      // Allow microtasks to settle so all calls have hit the bridge.
+      await new Promise<void>((r) => setImmediate(r))
+      // With maxConcurrency=1, only one should be in-flight at a time.
+      expect(observedMax).toBe(1)
+
+      // Drain.
+      while (releases.length > 0) {
+        const r = releases.shift()!
+        r()
+        // Let the next one start.
+        await new Promise<void>((res) => setImmediate(res))
+      }
+
+      await Promise.all([p1, p2, p3])
+      // Across the run, never more than 1 concurrent
+      expect(observedMax).toBe(1)
+    })
+
+    it('allows unlimited concurrency by default', async () => {
+      let inFlight = 0
+      let observedMax = 0
+      const releases: Array<() => void> = []
+      const adapter = createDummyAdapter({
+        id: 'unlimited',
+        respond: () => {
+          inFlight += 1
+          observedMax = Math.max(observedMax, inFlight)
+          return new Promise<string>((resolve) => {
+            releases.push(() => {
+              inFlight -= 1
+              resolve('done')
+            })
+          })
+        },
+      })
+      const bridge = createBridge({ adapters: [adapter] })
+      const p1 = bridge.complete('a')
+      const p2 = bridge.complete('b')
+      const p3 = bridge.complete('c')
+
+      await new Promise<void>((r) => setImmediate(r))
+      // No concurrency cap → all 3 should be in flight at once.
+      expect(observedMax).toBe(3)
+
+      releases.forEach((r) => r())
+      await Promise.all([p1, p2, p3])
+    })
+  })
+
+  describe('log injection defense', () => {
+    it('sanitizes adapter id with control chars in unknown_adapter message', () => {
+      // primary id contains injected control chars; bridge should
+      // sanitize it before embedding in the BridgeError message.
+      const evilId = 'evil\nINJECTED\rline'
+      const err = (() => {
+        try {
+          createBridge({
+            adapters: [createDummyAdapter({ id: 'a' })],
+            primary: evilId,
+          })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      // No raw newlines / carriage returns leaked into the message
+      expect((err as Error).message).not.toMatch(/[\r\n]/)
+      // Escaped form is present
+      expect((err as Error).message).toContain('\\x0a')
+    })
+
+    it('sanitizes thrown policy message', async () => {
+      const bridge = createBridge({
+        adapters: [createDummyAdapter({ id: 'a' })],
+        policy: {
+          pickOrder: () => {
+            throw new Error('attack\nlog\rforge')
+          },
+        },
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(BridgeError)
+      expect(err.message).not.toMatch(/[\r\n]/)
+    })
+  })
+
+  describe('policy mutation defense', () => {
+    it('snapshots policy-returned order so post-return mutation is ignored', async () => {
+      // Policy returns an array, then mutates it after returning.
+      // The bridge must use a snapshot for iteration.
+      const liveOrder: string[] = ['a', 'b']
+      const bridge = createBridge({
+        adapters: [
+          createDummyAdapter({ id: 'a', text: 'A' }),
+          createDummyAdapter({ id: 'b', text: 'B' }),
+        ],
+        policy: {
+          pickOrder: () => {
+            // Schedule a mutation after pickOrder returns. If the
+            // bridge held the live reference, this would corrupt
+            // the in-flight iteration.
+            setTimeout(() => liveOrder.push('zzz'), 0)
+            return liveOrder
+          },
+        },
+      })
+      const text = await bridge.complete('hi')
+      expect(text).toBe('A') // primary 'a' was used; mutation didn't matter
+    })
+  })
+
   describe('API ergonomics', () => {
     it('complete works when destructured from bridge (no this binding)', async () => {
       const bridge = createBridge({

@@ -20,6 +20,7 @@ import type {
   CompleteResult,
 } from './adapter'
 import { AdapterError, isAdapterError } from './adapter'
+import { sanitizeForMessage, createSemaphore, type Semaphore } from './internal-utils'
 
 /**
  * Routing policy — given a prompt + options, return ordered adapter
@@ -150,12 +151,26 @@ function assertNoDuplicateIds(order: readonly string[]): readonly string[] {
     if (seen.has(id)) {
       throw new BridgeError(
         'duplicate_in_order',
-        `routing order contains duplicate adapter id: '${id}'`,
+        `routing order contains duplicate adapter id: '${sanitizeForMessage(id)}'`,
       )
     }
     seen.add(id)
   }
   return order
+}
+
+/**
+ * Convert a signal abort into an AdapterError, preserving
+ * AbortSignal.reason as the cause when the runtime exposes it. Useful
+ * for distinguishing user cancel vs AbortSignal.timeout() etc.
+ */
+function abortedError(
+  message: string,
+  signal: AbortSignal | undefined,
+  adapterId: string | undefined,
+): AdapterError {
+  const reason = signal?.reason
+  return new AdapterError('aborted', message, adapterId, reason)
 }
 
 export function createBridge(options: BridgeOptions): Bridge {
@@ -165,14 +180,21 @@ export function createBridge(options: BridgeOptions): Bridge {
 
   // Build the registry first.
   const adapterMap = new Map<string, Adapter>()
+  // Per-adapter concurrency limiter. Adapters that don't declare
+  // maxConcurrency get no semaphore (unlimited concurrency).
+  const semaphores = new Map<string, Semaphore>()
   for (const a of options.adapters) {
     if (adapterMap.has(a.metadata.id)) {
       throw new BridgeError(
         'duplicate_adapter',
-        `duplicate adapter id: ${a.metadata.id}`,
+        `duplicate adapter id: ${sanitizeForMessage(a.metadata.id)}`,
       )
     }
     adapterMap.set(a.metadata.id, a)
+    const max = a.metadata.maxConcurrency
+    if (max !== undefined && max < Number.POSITIVE_INFINITY) {
+      semaphores.set(a.metadata.id, createSemaphore(max))
+    }
   }
 
   const policy = options.policy
@@ -188,7 +210,7 @@ export function createBridge(options: BridgeOptions): Bridge {
     if (!adapterMap.has(primary)) {
       throw new BridgeError(
         'unknown_adapter',
-        `primary adapter '${primary}' is not in adapters list`,
+        `primary adapter '${sanitizeForMessage(primary)}' is not in adapters list`,
       )
     }
     const fallback = options.fallback ?? options.adapters
@@ -198,11 +220,30 @@ export function createBridge(options: BridgeOptions): Bridge {
       if (!adapterMap.has(id)) {
         throw new BridgeError(
           'unknown_adapter',
-          `fallback adapter '${id}' is not in adapters list`,
+          `fallback adapter '${sanitizeForMessage(id)}' is not in adapters list`,
         )
       }
     }
-    defaultOrder = assertNoDuplicateIds([primary, ...fallback])
+    defaultOrder = Object.freeze(assertNoDuplicateIds([primary, ...fallback]).slice())
+  }
+
+  /**
+   * Run `adapter.complete(...)` under the adapter's concurrency
+   * limiter (if declared); otherwise call directly.
+   */
+  async function callAdapter(
+    adapter: Adapter,
+    prompt: string,
+    options: CompleteOptions | undefined,
+  ): Promise<CompleteResult> {
+    const sem = semaphores.get(adapter.metadata.id)
+    if (!sem) return adapter.complete(prompt, options)
+    const release = await sem.acquire()
+    try {
+      return await adapter.complete(prompt, options)
+    } finally {
+      release()
+    }
   }
 
   /**
@@ -224,9 +265,9 @@ export function createBridge(options: BridgeOptions): Bridge {
       // adapterId if we never started one) — not the next adapter
       // we never reached.
       if (completeOptions?.signal?.aborted) {
-        throw new AdapterError(
-          'aborted',
+        throw abortedError(
           'request aborted between adapters',
+          completeOptions.signal,
           lastAttemptedId,
         )
       }
@@ -235,12 +276,23 @@ export function createBridge(options: BridgeOptions): Bridge {
         // Unknown id from a policy is a programming bug — fail loud.
         throw new BridgeError(
           'unknown_adapter',
-          `routing order contains unknown adapter id: '${id}'`,
+          `routing order contains unknown adapter id: '${sanitizeForMessage(id)}'`,
         )
       }
       lastAttemptedId = id
       try {
-        const result = await adapter.complete(prompt, completeOptions)
+        const result = await callAdapter(adapter, prompt, completeOptions)
+        // Adapters may not honor signal mid-flight (e.g., a local
+        // sync llama.cpp call). Even if they returned a result, if
+        // the signal was aborted during, treat as aborted — the
+        // caller wanted to give up.
+        if (completeOptions?.signal?.aborted) {
+          throw abortedError(
+            'request aborted during adapter completion',
+            completeOptions.signal,
+            id,
+          )
+        }
         return { ...result, adapterId: id }
       } catch (error) {
         const adapterError = toAdapterError(error, id)
@@ -256,7 +308,9 @@ export function createBridge(options: BridgeOptions): Bridge {
     throw new BridgeError(
       'aggregate',
       `all ${order.length} adapter(s) failed: ` +
-        errors.map((e) => `${e.adapterId}=${e.code}`).join(', '),
+        errors
+          .map((e) => `${sanitizeForMessage(e.adapterId ?? '?')}=${e.code}`)
+          .join(', '),
       errors,
     )
   }
@@ -270,25 +324,29 @@ export function createBridge(options: BridgeOptions): Bridge {
   ): Promise<CompleteResult> {
     // Early abort check — don't run policy if the caller already gave up.
     if (options?.signal?.aborted) {
-      throw new AdapterError('aborted', 'request aborted before routing')
+      throw abortedError('request aborted before routing', options.signal, undefined)
     }
 
     let order: readonly string[]
     if (policy) {
+      let policyOrder: readonly string[]
       try {
-        order = policy.pickOrder(prompt, options, [...adapterMap.keys()])
+        policyOrder = policy.pickOrder(prompt, options, [...adapterMap.keys()])
       } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
         throw new BridgeError(
           'policy_error',
-          `routing policy threw: ${error instanceof Error ? error.message : String(error)}`,
+          `routing policy threw: ${sanitizeForMessage(msg)}`,
           error,
         )
       }
-      if (order.length === 0) {
+      if (policyOrder.length === 0) {
         throw new BridgeError('no_adapters', 'routing policy returned empty order')
       }
-      // Policy-supplied orders may also contain duplicates; reject loudly.
-      order = assertNoDuplicateIds(order)
+      // Snapshot to defend against the policy mutating its own return
+      // value mid-flight (would otherwise change the iteration target).
+      const snapshot = Object.freeze([...policyOrder])
+      order = assertNoDuplicateIds(snapshot)
     } else {
       order = defaultOrder
     }
