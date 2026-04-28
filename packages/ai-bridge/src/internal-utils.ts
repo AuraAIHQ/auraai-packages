@@ -41,12 +41,17 @@ export function safeToString(value: unknown): string {
  */
 export function sanitizeForMessage(value: string, maxLen = 200): string {
   if (typeof value !== 'string') {
-    // Defensive: even though TS says string, guard against runtime misuse.
     value = safeToString(value)
   }
+  // Edge cases for tiny maxLen — guarantee output.length <= maxLen.
+  if (maxLen <= 0) return ''
   const ellipsis = '…'
-  // maxLen INCLUDES the ellipsis if truncation occurs.
-  const budget = Math.max(1, maxLen - ellipsis.length)
+  if (maxLen <= ellipsis.length) {
+    // Can't even fit the ellipsis cleanly — truncate the value
+    // characters directly without escapes/ellipsis logic.
+    return value.length > maxLen ? value.slice(0, maxLen) : value
+  }
+  const budget = maxLen - ellipsis.length
   // Bound input scan to maxLen * 6 worst-case (each char up to \\uNNNN = 6).
   const inputCap = Math.min(value.length, maxLen * 6)
   const out: string[] = []
@@ -63,14 +68,12 @@ export function sanitizeForMessage(value: string, maxLen = 200): string {
       chunk = value[i]!
     }
     if (outLen + chunk.length > budget) {
-      // Won't fit — truncate with ellipsis, ensure total <= maxLen.
       out.push(ellipsis)
       return out.join('')
     }
     out.push(chunk)
     outLen += chunk.length
   }
-  // If the input exceeded our scan budget, mark truncation.
   if (value.length > inputCap) {
     while (out.length > 0 && outLen + ellipsis.length > maxLen) {
       const removed = out.pop()!
@@ -135,27 +138,49 @@ interface QueueEntry {
   reject: (err: Error) => void
   signal?: AbortSignal
   onAbort?: () => void
+  /** Cancellation tombstone — release skips canceled entries. */
+  canceled: boolean
 }
 
 export function createSemaphore(maxConcurrent: number): Semaphore {
   if (maxConcurrent < 1) maxConcurrent = 1
   let active = 0
+  // Head-index queue: O(1) dequeue and O(1) cancel via tombstone.
+  // Periodically compacted when head exceeds half the queue length
+  // to avoid unbounded memory growth.
   const queue: QueueEntry[] = []
+  let head = 0
 
-  // Wrap a release closure so double-call is a no-op (defensive).
+  const compactIfNeeded = (): void => {
+    if (head > 16 && head * 2 > queue.length) {
+      queue.splice(0, head)
+      head = 0
+    }
+  }
+
   const makeReleaseClosure = (): (() => void) => {
     let released = false
     return () => {
       if (released) return
       released = true
-      const next = queue.shift()
+      // Advance past any canceled entries.
+      while (head < queue.length && queue[head]!.canceled) {
+        head += 1
+      }
+      const next = head < queue.length ? queue[head] : undefined
       if (next) {
-        // Detach any abort handler from the entry we're servicing.
+        head += 1
+        compactIfNeeded()
         if (next.onAbort) next.signal?.removeEventListener('abort', next.onAbort)
-        // Hand a fresh one-shot release to the next waiter.
         next.resolve(makeReleaseClosure())
       } else {
+        // Queue empty — return slot to pool.
         if (active > 0) active -= 1
+        // No more entries means head === queue.length; clear array.
+        if (queue.length > 0) {
+          queue.length = 0
+          head = 0
+        }
       }
     }
   }
@@ -170,13 +195,13 @@ export function createSemaphore(maxConcurrent: number): Semaphore {
         return Promise.resolve(makeReleaseClosure())
       }
       return new Promise<() => void>((resolve, reject) => {
-        const entry: QueueEntry = { resolve, reject, signal }
+        const entry: QueueEntry = { resolve, reject, signal, canceled: false }
         if (signal) {
           entry.onAbort = () => {
-            // Remove this entry from the queue so the slot isn't
-            // wasted on an abandoned waiter.
-            const idx = queue.indexOf(entry)
-            if (idx >= 0) queue.splice(idx, 1)
+            // Mark as canceled — release will skip it. O(1) instead
+            // of indexOf+splice (which would be O(n) per cancel and
+            // cause O(n²) under heavy contention).
+            entry.canceled = true
             reject(new SemaphoreAbortError(signal.reason))
           }
           signal.addEventListener('abort', entry.onAbort, { once: true })

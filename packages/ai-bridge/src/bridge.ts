@@ -288,6 +288,18 @@ export function createBridge(options: BridgeOptions): Bridge {
     // the same adapter object share the same limit (matches the
     // physical reality: one llama.cpp model session, one limit).
     const max = a.metadata.maxConcurrency
+
+    // Drift detection: if a previous bridge registered this adapter
+    // with maxConcurrency set but now it's undefined, surface it
+    // rather than silently letting the old limiter apply.
+    if (max === undefined && ADAPTER_SEMAPHORES.has(a)) {
+      const existing = ADAPTER_SEMAPHORES.get(a)!
+      throw new BridgeError(
+        'invalid_adapter_metadata',
+        `adapter '${sanitizeForMessage(a.metadata.id)}' was previously registered with maxConcurrency=${existing.max} but is now undefined; refusing to silently keep stale limiter`,
+      )
+    }
+
     if (max !== undefined) {
       let normalized: number
       try {
@@ -502,22 +514,45 @@ export function createBridge(options: BridgeOptions): Bridge {
           `routing policy must return an array of strings, got ${typeof policyOrder}`,
         )
       }
+      // Bound length BEFORE cloning to prevent DoS from a buggy policy
+      // returning a massive array. The cap is absolute (not derived
+      // from adapter count) so legit cases — e.g. a 2-element order
+      // referencing 1 valid + 1 unknown id, which then fails at the
+      // unknown_adapter check — still work. 1024 is well beyond any
+      // sane routing scenario.
+      const POLICY_ORDER_MAX = 1024
+      if (policyOrder.length > POLICY_ORDER_MAX) {
+        throw new BridgeError(
+          'policy_invalid_return',
+          `routing policy returned ${policyOrder.length} entries (max ${POLICY_ORDER_MAX})`,
+        )
+      }
+      // Validate elements + dedupe in one pass; this becomes our snapshot.
+      const seen = new Set<string>()
+      const validated: string[] = []
       for (let i = 0; i < policyOrder.length; i += 1) {
-        if (typeof policyOrder[i] !== 'string') {
+        const el = policyOrder[i]
+        if (typeof el !== 'string') {
           throw new BridgeError(
             'policy_invalid_return',
-            `routing policy returned non-string at index ${i}: ${typeof policyOrder[i]}`,
+            `routing policy returned non-string at index ${i}: ${typeof el}`,
           )
         }
+        if (seen.has(el)) {
+          throw new BridgeError(
+            'duplicate_in_order',
+            `routing order contains duplicate adapter id: '${sanitizeForMessage(el)}'`,
+          )
+        }
+        seen.add(el)
+        validated.push(el)
       }
-      const validatedOrder = policyOrder as readonly string[]
-      if (validatedOrder.length === 0) {
+      if (validated.length === 0) {
         throw new BridgeError('no_adapters', 'routing policy returned empty order')
       }
-      // Snapshot to defend against the policy mutating its own return
-      // value mid-flight (would otherwise change the iteration target).
-      const snapshot = Object.freeze([...validatedOrder])
-      order = assertNoDuplicateIds(snapshot)
+      // Freeze the validated snapshot so policy mutation post-return
+      // can't affect iteration.
+      order = Object.freeze(validated)
     } else {
       order = defaultOrder
     }

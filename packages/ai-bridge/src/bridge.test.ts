@@ -298,6 +298,19 @@ describe('@auraaihq/ai-bridge', () => {
       expect((err as BridgeError).code).toBe('policy_invalid_return')
     })
 
+    it('rejects unbounded policy returns to prevent DoS (>1024 entries)', async () => {
+      const bridge = createBridge({
+        adapters: [createInProcessAdapter({ id: 'a' })],
+        policy: {
+          pickOrder: () => Array(2000).fill('a') as readonly string[],
+        },
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('policy_invalid_return')
+      expect((err as Error).message).toContain('2000 entries')
+    })
+
     it('throws BridgeError(policy_invalid_return) when policy returns array with non-string elements', async () => {
       const bridge = createBridge({
         adapters: [createInProcessAdapter({ id: 'a' })],
@@ -901,6 +914,29 @@ describe('@auraaihq/ai-bridge', () => {
   })
 
   describe('per-adapter-instance concurrency (WeakMap)', () => {
+    it('rejects when maxConcurrency drifts from set to undefined', () => {
+      const adapter = createInProcessAdapter({
+        id: 'drift-undef',
+        metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number }>,
+      })
+      createBridge({ adapters: [adapter] }) // first registration: max=1
+
+      // Mutate metadata to undefined
+      const mutable = adapter as { metadata: { maxConcurrency?: number } }
+      delete mutable.metadata.maxConcurrency
+      const err = (() => {
+        try {
+          createBridge({ adapters: [adapter] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+      expect((err as Error).message).toContain('previously registered')
+    })
+
     it('rejects conflicting maxConcurrency on second bridge for same adapter', () => {
       // First bridge registers adapter with max=1; second tries max=2 → conflict.
       // Note: since the in-process adapter's metadata is constructed at
