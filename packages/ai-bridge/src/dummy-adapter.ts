@@ -8,6 +8,7 @@
 // Real adapters live in @auraaihq/ai-{idoris,claude,openai,local}.
 
 import type { Adapter, AdapterMetadata, CompleteOptions, CompleteResult } from './adapter'
+import type { AdapterErrorCode } from './adapter'
 import { AdapterError } from './adapter'
 
 export interface DummyAdapterOptions {
@@ -17,7 +18,7 @@ export interface DummyAdapterOptions {
   /** Compute response from prompt + options. Overrides `text` if set. */
   respond?: (prompt: string, options: CompleteOptions | undefined) => string | Promise<string>
   /** Throw an AdapterError with this code on every call. */
-  throwCode?: AdapterError['code']
+  throwCode?: AdapterErrorCode
   /** Synthetic latency in ms before responding. */
   latencyMs?: number
   /** Override metadata fields. */
@@ -31,6 +32,34 @@ const defaultMetadata: AdapterMetadata = {
   local: true,
 }
 
+/**
+ * Sleep for `ms`, rejecting early on abort. Always cleans up the
+ * timer + abort listener — no leaks even on the success path.
+ * Pre-checks `signal.aborted` so an already-aborted request doesn't
+ * waste real wall-clock time.
+ */
+function abortableDelay(ms: number, signal: AbortSignal | undefined, adapterId: string): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new AdapterError('aborted', 'aborted before delay started', adapterId))
+  }
+  return new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const cleanup = (): void => {
+      if (timer !== undefined) clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
+    const onAbort = (): void => {
+      cleanup()
+      reject(new AdapterError('aborted', 'aborted by signal', adapterId))
+    }
+    timer = setTimeout(() => {
+      cleanup()
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export function createDummyAdapter(options: DummyAdapterOptions = {}): Adapter {
   const metadata: AdapterMetadata = {
     ...defaultMetadata,
@@ -41,22 +70,18 @@ export function createDummyAdapter(options: DummyAdapterOptions = {}): Adapter {
   return {
     metadata,
     async complete(prompt, completeOptions): Promise<CompleteResult> {
-      if (options.latencyMs && options.latencyMs > 0) {
-        await new Promise<void>((resolve, reject) => {
-          const t = setTimeout(resolve, options.latencyMs)
-          completeOptions?.signal?.addEventListener(
-            'abort',
-            () => {
-              clearTimeout(t)
-              reject(new AdapterError('aborted', 'aborted by signal', metadata.id))
-            },
-            { once: true },
-          )
-        })
-      }
-
+      // Pre-check abort — don't even start latency timer if already aborted.
       if (completeOptions?.signal?.aborted) {
         throw new AdapterError('aborted', 'aborted before completion', metadata.id)
+      }
+
+      if (options.latencyMs && options.latencyMs > 0) {
+        await abortableDelay(options.latencyMs, completeOptions?.signal, metadata.id)
+      }
+
+      // Re-check after delay — could have been aborted during.
+      if (completeOptions?.signal?.aborted) {
+        throw new AdapterError('aborted', 'aborted after delay', metadata.id)
       }
 
       if (options.throwCode) {

@@ -9,14 +9,18 @@ export { VERSION } from './version'
 export {
   type Adapter,
   type AdapterMetadata,
+  type AdapterErrorCode,
+  type ProviderFamily,
   type CompleteOptions,
   type CompleteResult,
   AdapterError,
+  isAdapterError,
 } from './adapter'
 export {
   createBridge,
   type Bridge,
   type BridgeOptions,
+  type BridgeErrorCode,
   type RoutingPolicy,
   BridgeError,
 } from './bridge'
