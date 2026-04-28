@@ -32,8 +32,16 @@ export interface AdapterMetadata {
    * Maximum number of concurrent `complete()` calls the bridge will
    * dispatch to this adapter. Adapters backed by single-session model
    * runners (e.g., llama.cpp bindings) MUST set this to `1` to prevent
-   * deadlock or corrupted output under parallel callers. Default
-   * (omitted) is unlimited concurrency. Values < 1 are treated as 1.
+   * deadlock or corrupted output under parallel callers.
+   *
+   * Constraints (enforced by `createBridge`):
+   * - Must be a positive integer (no NaN, Infinity, non-integers).
+   * - Must be `>= 1`.
+   * - When the same Adapter instance is registered with a second
+   *   bridge, the value MUST match the first registration (conflicts
+   *   throw `BridgeError('invalid_adapter_metadata')`).
+   *
+   * Omit for unlimited concurrency.
    */
   readonly maxConcurrency?: number
 }

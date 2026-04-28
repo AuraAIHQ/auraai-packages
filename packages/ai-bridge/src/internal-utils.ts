@@ -85,11 +85,12 @@ export interface Semaphore {
 }
 
 export class SemaphoreAbortError extends Error {
-  readonly cause?: unknown
   constructor(cause?: unknown) {
-    super('semaphore acquire aborted')
+    super(
+      'semaphore acquire aborted',
+      cause === undefined ? undefined : { cause },
+    )
     this.name = 'SemaphoreAbortError'
-    this.cause = cause
   }
 }
 

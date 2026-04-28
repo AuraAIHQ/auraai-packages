@@ -817,7 +817,90 @@ describe('@auraaihq/ai-bridge', () => {
     })
   })
 
+  describe('metadata shape validation', () => {
+    it('rejects non-string id', () => {
+      const bad = {
+        metadata: { id: 42, name: 'x', provider: 'other', local: true } as unknown as { id: string; name: string; provider: 'other'; local: boolean },
+        async complete() {
+          return { text: '' }
+        },
+      }
+      const err = (() => {
+        try {
+          createBridge({ adapters: [bad as unknown as Parameters<typeof createBridge>[0]['adapters'][number]] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+    })
+
+    it('rejects missing metadata', () => {
+      const bad = { metadata: undefined, async complete() { return { text: '' } } }
+      const err = (() => {
+        try {
+          createBridge({ adapters: [bad as unknown as Parameters<typeof createBridge>[0]['adapters'][number]] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+    })
+
+    it('rejects non-boolean local', () => {
+      const bad = {
+        metadata: { id: 'x', name: 'x', provider: 'other', local: 'yes' },
+        async complete() { return { text: '' } },
+      }
+      const err = (() => {
+        try {
+          createBridge({ adapters: [bad as unknown as Parameters<typeof createBridge>[0]['adapters'][number]] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+      expect((err as Error).message).toContain('local')
+    })
+  })
+
   describe('per-adapter-instance concurrency (WeakMap)', () => {
+    it('rejects conflicting maxConcurrency on second bridge for same adapter', () => {
+      // First bridge registers adapter with max=1; second tries max=2 → conflict.
+      // Note: since the in-process adapter's metadata is constructed at
+      // create time, we mutate after first registration to simulate drift.
+      const adapter = createInProcessAdapter({
+        id: 'conflict-test',
+        metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number }>,
+      })
+      createBridge({ adapters: [adapter] }) // first registration: max=1
+
+      // Mutate metadata to simulate drift, then re-register
+      const mutable = adapter as { metadata: { maxConcurrency?: number } }
+      Object.defineProperty(mutable.metadata, 'maxConcurrency', {
+        value: 2,
+        writable: true,
+        configurable: true,
+      })
+      const err = (() => {
+        try {
+          createBridge({ adapters: [adapter] })
+        } catch (e) {
+          return e
+        }
+        return undefined
+      })()
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('invalid_adapter_metadata')
+      expect((err as Error).message).toContain('previously registered')
+    })
+
     it('shares concurrency limit when same adapter is registered with two bridges', async () => {
       let inFlight = 0
       let observedMax = 0

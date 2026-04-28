@@ -29,13 +29,65 @@ import {
   type Semaphore,
 } from './internal-utils'
 
+interface SemaphoreEntry {
+  sem: Semaphore
+  /** The maxConcurrency value at first registration, for conflict detection. */
+  max: number
+}
+
 /**
  * Module-level WeakMap keyed by Adapter instance so the concurrency
  * limit follows the adapter object — even when shared across multiple
  * bridges or pulled in via different packages. WeakMap doesn't pin
  * the adapter in memory; it's collected when the adapter is.
+ *
+ * Stores both the semaphore AND the max value so a second bridge
+ * registering the same adapter with a different max can be detected
+ * and rejected (we don't silently use stale config).
  */
-const ADAPTER_SEMAPHORES = new WeakMap<Adapter, Semaphore>()
+const ADAPTER_SEMAPHORES = new WeakMap<Adapter, SemaphoreEntry>()
+
+/**
+ * Validate the structural shape of adapter metadata at runtime.
+ * TypeScript signatures don't help when adapters are JS-authored or
+ * when arbitrary objects are passed dynamically. Throws BridgeError
+ * with `invalid_adapter_metadata` on shape failure.
+ */
+function validateMetadataShape(adapter: Adapter, indexHint: number): void {
+  const m = adapter.metadata as unknown
+  const where = `adapters[${indexHint}].metadata`
+  if (!m || typeof m !== 'object') {
+    throw new BridgeError(
+      'invalid_adapter_metadata',
+      `${where} must be an object, got ${typeof m}`,
+    )
+  }
+  const meta = m as Record<string, unknown>
+  if (typeof meta.id !== 'string' || meta.id.length === 0) {
+    throw new BridgeError(
+      'invalid_adapter_metadata',
+      `${where}.id must be a non-empty string`,
+    )
+  }
+  if (typeof meta.name !== 'string') {
+    throw new BridgeError(
+      'invalid_adapter_metadata',
+      `adapter '${sanitizeForMessage(meta.id)}' metadata.name must be a string`,
+    )
+  }
+  if (typeof meta.provider !== 'string') {
+    throw new BridgeError(
+      'invalid_adapter_metadata',
+      `adapter '${sanitizeForMessage(meta.id)}' metadata.provider must be a string`,
+    )
+  }
+  if (typeof meta.local !== 'boolean') {
+    throw new BridgeError(
+      'invalid_adapter_metadata',
+      `adapter '${sanitizeForMessage(meta.id)}' metadata.local must be a boolean`,
+    )
+  }
+}
 
 /**
  * Routing policy — given a prompt + options, return ordered adapter
@@ -98,10 +150,15 @@ export interface Bridge extends AIHandle {
  * Stable error codes for bridge-level (not adapter-level) failures.
  *
  * - `no_adapters`: createBridge given no adapters, or policy returned []
- * - `unknown_adapter`: primary/fallback id not in adapters
+ * - `unknown_adapter`: primary/fallback id not in adapters, or policy
+ *   returned an id not in adapters
  * - `duplicate_adapter`: two adapters share the same id
  * - `duplicate_in_order`: routing order contains the same id twice
+ * - `invalid_adapter_metadata`: adapter metadata failed validation
+ *   (bad id type, invalid maxConcurrency, conflicting maxConcurrency
+ *   across bridges sharing the same adapter instance)
  * - `policy_error`: RoutingPolicy.pickOrder threw
+ * - `policy_invalid_return`: pickOrder didn't return an array of strings
  * - `aggregate`: every adapter in the order failed (with recoverable
  *   errors); see `cause` for the chain of underlying AdapterErrors
  * - `unsupported_method`: feature not implemented yet
@@ -197,7 +254,11 @@ export function createBridge(options: BridgeOptions): Bridge {
 
   // Build the registry first.
   const adapterMap = new Map<string, Adapter>()
-  for (const a of options.adapters) {
+  for (let i = 0; i < options.adapters.length; i += 1) {
+    const a = options.adapters[i]!
+    // Structural validation BEFORE using metadata fields.
+    validateMetadataShape(a, i)
+
     if (adapterMap.has(a.metadata.id)) {
       throw new BridgeError(
         'duplicate_adapter',
@@ -223,8 +284,21 @@ export function createBridge(options: BridgeOptions): Bridge {
           error,
         )
       }
-      if (!ADAPTER_SEMAPHORES.has(a)) {
-        ADAPTER_SEMAPHORES.set(a, createSemaphore(normalized))
+      // Conflict detection: if this adapter is already registered
+      // with another bridge that picked a different maxConcurrency,
+      // reject. Silently using stale config would be a footgun —
+      // surfacing the drift lets the developer reconcile.
+      const existing = ADAPTER_SEMAPHORES.get(a)
+      if (existing) {
+        if (existing.max !== normalized) {
+          throw new BridgeError(
+            'invalid_adapter_metadata',
+            `adapter '${sanitizeForMessage(a.metadata.id)}' was previously registered with maxConcurrency=${existing.max}, refusing to re-register with ${normalized}`,
+          )
+        }
+        // Same value — reuse existing semaphore.
+      } else {
+        ADAPTER_SEMAPHORES.set(a, { sem: createSemaphore(normalized), max: normalized })
       }
     }
   }
@@ -270,12 +344,12 @@ export function createBridge(options: BridgeOptions): Bridge {
     prompt: string,
     options: CompleteOptions | undefined,
   ): Promise<CompleteResult> {
-    const sem = ADAPTER_SEMAPHORES.get(adapter)
-    if (!sem) return adapter.complete(prompt, options)
+    const entry = ADAPTER_SEMAPHORES.get(adapter)
+    if (!entry) return adapter.complete(prompt, options)
 
     let release: () => void
     try {
-      release = await sem.acquire(options?.signal)
+      release = await entry.sem.acquire(options?.signal)
     } catch (error) {
       if (error instanceof SemaphoreAbortError) {
         throw new AdapterError(
@@ -463,15 +537,20 @@ export function createBridge(options: BridgeOptions): Bridge {
 function toAdapterError(error: unknown, adapterId: string): AdapterError {
   if (isAdapterError(error)) {
     // Preserve original instance via cause; the original stack/identity
-    // remains accessible for debugging.
+    // remains accessible for debugging. AdapterError messages from
+    // genuine adapters are trusted (they're produced by adapter code,
+    // not arbitrary remote payloads).
     if (error.adapterId === adapterId && error.cause !== undefined) {
       return error
     }
     return new AdapterError(error.code, error.message, adapterId, error)
   }
   if (error instanceof Error) {
-    return new AdapterError('unknown', error.message, adapterId, error)
+    // Error.message can contain attacker-controlled content (e.g., a
+    // remote API echoing back user input verbatim). Sanitize before
+    // surfacing into a structured AdapterError that may end up logged.
+    return new AdapterError('unknown', sanitizeForMessage(error.message), adapterId, error)
   }
-  // safeToString never throws — handles weird/adversarial values.
-  return new AdapterError('unknown', safeToString(error), adapterId, error)
+  // Non-Error throws: safeToString never throws; sanitize the result.
+  return new AdapterError('unknown', sanitizeForMessage(safeToString(error)), adapterId, error)
 }
