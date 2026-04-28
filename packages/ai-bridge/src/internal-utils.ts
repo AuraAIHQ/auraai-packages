@@ -47,9 +47,10 @@ export function sanitizeForMessage(value: string, maxLen = 200): string {
   if (maxLen <= 0) return ''
   const ellipsis = '…'
   if (maxLen <= ellipsis.length) {
-    // Can't even fit the ellipsis cleanly — truncate the value
-    // characters directly without escapes/ellipsis logic.
-    return value.length > maxLen ? value.slice(0, maxLen) : value
+    // Can't fit a sanitized value — return a safe placeholder rather
+    // than raw input slice (which could contain newlines/control chars
+    // and defeat the whole point of this helper).
+    return ellipsis.slice(0, maxLen)
   }
   const budget = maxLen - ellipsis.length
   // Bound input scan to maxLen * 6 worst-case (each char up to \\uNNNN = 6).
@@ -62,7 +63,16 @@ export function sanitizeForMessage(value: string, maxLen = 200): string {
     let chunk: string
     if ((ch >= 0x00 && ch <= 0x1f) || ch === 0x7f) {
       chunk = '\\x' + ch.toString(16).padStart(2, '0')
-    } else if (ch === 0x2028 || ch === 0x2029) {
+    } else if (
+      ch === 0x85 ||                       // NEL (next line)
+      ch === 0x2028 ||                     // line separator
+      ch === 0x2029 ||                     // paragraph separator
+      (ch >= 0x202a && ch <= 0x202e) ||    // bidi formatting
+      (ch >= 0x2066 && ch <= 0x2069)       // bidi isolates
+    ) {
+      // Escape Unicode controls that pipelines or terminals might
+      // interpret as line breaks or visually spoof log lines (Trojan
+      // Source style, CVE-2021-42574).
       chunk = '\\u' + ch.toString(16).padStart(4, '0')
     } else {
       chunk = value[i]!
