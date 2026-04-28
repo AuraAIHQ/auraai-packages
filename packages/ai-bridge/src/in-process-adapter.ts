@@ -1,17 +1,18 @@
-// In-process adapter useful for tests and as a fallback. It can be
+// In-process adapter useful for tests and as a deterministic fallback.
+// Runs entirely in the calling process (no I/O, no network). It can be
 // configured to:
 //   - return a fixed response,
 //   - call a function for each prompt,
 //   - throw a specific AdapterError code,
 //   - simulate latency.
 //
-// Real adapters live in @auraaihq/ai-{idoris,claude,openai,local}.
+// Real provider adapters live in @auraaihq/ai-{idoris,claude,openai,local}.
 
 import type { Adapter, AdapterMetadata, CompleteOptions, CompleteResult } from './adapter'
 import type { AdapterErrorCode } from './adapter'
 import { AdapterError } from './adapter'
 
-export interface DummyAdapterOptions {
+export interface InProcessAdapterOptions {
   id?: string
   /** Pre-canned text response. */
   text?: string
@@ -26,8 +27,8 @@ export interface DummyAdapterOptions {
 }
 
 const defaultMetadata: AdapterMetadata = {
-  id: 'dummy',
-  name: 'Dummy Adapter',
+  id: 'in-process',
+  name: 'In-Process Adapter',
   provider: 'other',
   local: true,
 }
@@ -88,7 +89,7 @@ function abortableDelay(ms: number, signal: AbortSignal | undefined, adapterId: 
   })
 }
 
-export function createDummyAdapter(options: DummyAdapterOptions = {}): Adapter {
+export function createInProcessAdapter(options: InProcessAdapterOptions = {}): Adapter {
   const metadata: AdapterMetadata = {
     ...defaultMetadata,
     ...(options.metadata ?? {}),
@@ -130,7 +131,7 @@ export function createDummyAdapter(options: DummyAdapterOptions = {}): Adapter {
 
       const text = options.respond
         ? await options.respond(prompt, completeOptions)
-        : (options.text ?? `[dummy ${metadata.id}] ${prompt}`)
+        : (options.text ?? `[${metadata.id}] ${prompt}`)
 
       return {
         text,

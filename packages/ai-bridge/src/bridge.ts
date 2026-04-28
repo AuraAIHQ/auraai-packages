@@ -20,7 +20,22 @@ import type {
   CompleteResult,
 } from './adapter'
 import { AdapterError, isAdapterError } from './adapter'
-import { sanitizeForMessage, createSemaphore, type Semaphore } from './internal-utils'
+import {
+  sanitizeForMessage,
+  safeToString,
+  createSemaphore,
+  normalizeMaxConcurrency,
+  SemaphoreAbortError,
+  type Semaphore,
+} from './internal-utils'
+
+/**
+ * Module-level WeakMap keyed by Adapter instance so the concurrency
+ * limit follows the adapter object — even when shared across multiple
+ * bridges or pulled in via different packages. WeakMap doesn't pin
+ * the adapter in memory; it's collected when the adapter is.
+ */
+const ADAPTER_SEMAPHORES = new WeakMap<Adapter, Semaphore>()
 
 /**
  * Routing policy — given a prompt + options, return ordered adapter
@@ -180,9 +195,6 @@ export function createBridge(options: BridgeOptions): Bridge {
 
   // Build the registry first.
   const adapterMap = new Map<string, Adapter>()
-  // Per-adapter concurrency limiter. Adapters that don't declare
-  // maxConcurrency get no semaphore (unlimited concurrency).
-  const semaphores = new Map<string, Semaphore>()
   for (const a of options.adapters) {
     if (adapterMap.has(a.metadata.id)) {
       throw new BridgeError(
@@ -191,9 +203,26 @@ export function createBridge(options: BridgeOptions): Bridge {
       )
     }
     adapterMap.set(a.metadata.id, a)
+
+    // Per-adapter concurrency limiter. Stored in a module-level
+    // WeakMap keyed by adapter INSTANCE so multiple bridges sharing
+    // the same adapter object share the same limit (matches the
+    // physical reality: one llama.cpp model session, one limit).
     const max = a.metadata.maxConcurrency
-    if (max !== undefined && max < Number.POSITIVE_INFINITY) {
-      semaphores.set(a.metadata.id, createSemaphore(max))
+    if (max !== undefined) {
+      let normalized: number
+      try {
+        normalized = normalizeMaxConcurrency(max)
+      } catch (error) {
+        throw new BridgeError(
+          'duplicate_adapter',  // mis-config category
+          `adapter '${sanitizeForMessage(a.metadata.id)}' has invalid maxConcurrency: ${safeToString(error)}`,
+          error,
+        )
+      }
+      if (!ADAPTER_SEMAPHORES.has(a)) {
+        ADAPTER_SEMAPHORES.set(a, createSemaphore(normalized))
+      }
     }
   }
 
@@ -229,17 +258,44 @@ export function createBridge(options: BridgeOptions): Bridge {
 
   /**
    * Run `adapter.complete(...)` under the adapter's concurrency
-   * limiter (if declared); otherwise call directly.
+   * limiter (if declared); otherwise call directly. The limiter's
+   * acquire is abortable so a queued request that gets cancelled
+   * doesn't waste the slot on a subsequent adapter call.
    */
   async function callAdapter(
     adapter: Adapter,
     prompt: string,
     options: CompleteOptions | undefined,
   ): Promise<CompleteResult> {
-    const sem = semaphores.get(adapter.metadata.id)
+    const sem = ADAPTER_SEMAPHORES.get(adapter)
     if (!sem) return adapter.complete(prompt, options)
-    const release = await sem.acquire()
+
+    let release: () => void
     try {
+      release = await sem.acquire(options?.signal)
+    } catch (error) {
+      if (error instanceof SemaphoreAbortError) {
+        throw new AdapterError(
+          'aborted',
+          'aborted while waiting for adapter slot',
+          adapter.metadata.id,
+          error.cause,
+        )
+      }
+      throw error
+    }
+
+    try {
+      // Re-check after acquire — the queue wait might have been long
+      // and the caller may have aborted just before our slot opened.
+      if (options?.signal?.aborted) {
+        throw new AdapterError(
+          'aborted',
+          'aborted just before adapter call',
+          adapter.metadata.id,
+          options.signal.reason,
+        )
+      }
       return await adapter.complete(prompt, options)
     } finally {
       release()
@@ -330,10 +386,13 @@ export function createBridge(options: BridgeOptions): Bridge {
     let order: readonly string[]
     if (policy) {
       let policyOrder: readonly string[]
+      // Hand the policy an immutable view of available ids so it
+      // can't accidentally corrupt our internal state.
+      const availableSnapshot = Object.freeze([...adapterMap.keys()])
       try {
-        policyOrder = policy.pickOrder(prompt, options, [...adapterMap.keys()])
+        policyOrder = policy.pickOrder(prompt, options, availableSnapshot)
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error)
+        const msg = error instanceof Error ? error.message : safeToString(error)
         throw new BridgeError(
           'policy_error',
           `routing policy threw: ${sanitizeForMessage(msg)}`,
@@ -355,7 +414,9 @@ export function createBridge(options: BridgeOptions): Bridge {
   }
 
   const bridge: Bridge = {
-    adapterIds: [...adapterMap.keys()],
+    // Frozen snapshot — callers can't mutate despite TypeScript's
+    // readonly modifier (which is compile-time only).
+    adapterIds: Object.freeze([...adapterMap.keys()]),
 
     getAdapter(id) {
       return adapterMap.get(id)
@@ -389,5 +450,6 @@ function toAdapterError(error: unknown, adapterId: string): AdapterError {
   if (error instanceof Error) {
     return new AdapterError('unknown', error.message, adapterId, error)
   }
-  return new AdapterError('unknown', String(error), adapterId, error)
+  // safeToString never throws — handles weird/adversarial values.
+  return new AdapterError('unknown', safeToString(error), adapterId, error)
 }

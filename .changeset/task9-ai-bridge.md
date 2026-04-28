@@ -11,7 +11,7 @@ Add AI Layer router (`@auraaihq/ai-bridge`):
 - Routing strategy: try primary; on retryable errors (`rate_limit`/`timeout`/`network`) fall through configured fallback chain; non-retryable errors surface immediately
 - Custom `RoutingPolicy` interface — given prompt + options + available ids, return ordered adapter ids to try
 - `BridgeError` with codes (`no_adapters`, `unknown_adapter`, `all_adapters_failed`, `unsupported_method`)
-- `createDummyAdapter` for tests + as a fallback (configurable text/respond callback/throwCode/latencyMs)
+- `createInProcessAdapter` for tests + as a deterministic fallback (configurable text/respond callback/throwCode/latencyMs)
 - `AbortSignal` propagation through bridge → adapter
 
 SDK changes (alongside):

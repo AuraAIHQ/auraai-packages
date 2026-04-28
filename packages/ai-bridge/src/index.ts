@@ -1,9 +1,9 @@
 // @auraaihq/ai-bridge — AI Layer router for Agent24-Desktop kernel.
 //
-// Concrete adapters (idoris / claude / openai / local) are separate
-// packages (@auraaihq/ai-* — landing in M1+). This package defines
-// the adapter contract, the routing/fallback bridge, and a dummy
-// adapter for testing.
+// Concrete provider adapters (idoris / claude / openai / local) ship
+// as separate packages (@auraaihq/ai-* — landing in M1+). This package
+// defines the adapter contract, the routing/fallback bridge, and an
+// in-process adapter for testing.
 
 export { VERSION } from './version'
 export {
@@ -24,4 +24,7 @@ export {
   type RoutingPolicy,
   BridgeError,
 } from './bridge'
-export { createDummyAdapter, type DummyAdapterOptions } from './dummy-adapter'
+export {
+  createInProcessAdapter,
+  type InProcessAdapterOptions,
+} from './in-process-adapter'

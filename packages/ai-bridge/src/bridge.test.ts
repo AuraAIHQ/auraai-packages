@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createBridge, BridgeError } from './bridge'
-import { createDummyAdapter } from './dummy-adapter'
+import { createInProcessAdapter } from './in-process-adapter'
 import { AdapterError, isAdapterError, type AdapterErrorCode } from './adapter'
 
 describe('@auraaihq/ai-bridge', () => {
@@ -22,7 +22,7 @@ describe('@auraaihq/ai-bridge', () => {
       const err = (() => {
         try {
           createBridge({
-            adapters: [createDummyAdapter({ id: 'a' })],
+            adapters: [createInProcessAdapter({ id: 'a' })],
             primary: 'nope',
           })
         } catch (e) {
@@ -37,7 +37,7 @@ describe('@auraaihq/ai-bridge', () => {
     it('rejects unknown fallback id (default policy only)', () => {
       expect(() =>
         createBridge({
-          adapters: [createDummyAdapter({ id: 'a' })],
+          adapters: [createInProcessAdapter({ id: 'a' })],
           fallback: ['nope'],
         }),
       ).toThrow(/fallback adapter 'nope'/)
@@ -47,7 +47,7 @@ describe('@auraaihq/ai-bridge', () => {
       const err = (() => {
         try {
           createBridge({
-            adapters: [createDummyAdapter({ id: 'a' }), createDummyAdapter({ id: 'a' })],
+            adapters: [createInProcessAdapter({ id: 'a' }), createInProcessAdapter({ id: 'a' })],
           })
         } catch (e) {
           return e
@@ -62,7 +62,7 @@ describe('@auraaihq/ai-bridge', () => {
       const err = (() => {
         try {
           createBridge({
-            adapters: [createDummyAdapter({ id: 'a' }), createDummyAdapter({ id: 'b' })],
+            adapters: [createInProcessAdapter({ id: 'a' }), createInProcessAdapter({ id: 'b' })],
             primary: 'a',
             fallback: ['a'],
           })
@@ -78,8 +78,8 @@ describe('@auraaihq/ai-bridge', () => {
     it('uses first adapter as primary when none specified', async () => {
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({ id: 'a', text: 'A response' }),
-          createDummyAdapter({ id: 'b', text: 'B response' }),
+          createInProcessAdapter({ id: 'a', text: 'A response' }),
+          createInProcessAdapter({ id: 'b', text: 'B response' }),
         ],
       })
       const text = await bridge.complete('hello')
@@ -90,7 +90,7 @@ describe('@auraaihq/ai-bridge', () => {
       // primary 'nope' would fail without policy; with policy it's ignored
       expect(() =>
         createBridge({
-          adapters: [createDummyAdapter({ id: 'a' })],
+          adapters: [createInProcessAdapter({ id: 'a' })],
           primary: 'nope',
           fallback: ['also-nope'],
           policy: { pickOrder: () => ['a'] },
@@ -111,8 +111,8 @@ describe('@auraaihq/ai-bridge', () => {
       async (code) => {
         const bridge = createBridge({
           adapters: [
-            createDummyAdapter({ id: 'primary', throwCode: code }),
-            createDummyAdapter({ id: 'fallback', text: 'fallback' }),
+            createInProcessAdapter({ id: 'primary', throwCode: code }),
+            createInProcessAdapter({ id: 'fallback', text: 'fallback' }),
           ],
           primary: 'primary',
         })
@@ -131,8 +131,8 @@ describe('@auraaihq/ai-bridge', () => {
       async (code) => {
         const bridge = createBridge({
           adapters: [
-            createDummyAdapter({ id: 'primary', throwCode: code }),
-            createDummyAdapter({ id: 'fallback', text: 'fallback' }),
+            createInProcessAdapter({ id: 'primary', throwCode: code }),
+            createInProcessAdapter({ id: 'fallback', text: 'fallback' }),
           ],
           primary: 'primary',
         })
@@ -147,9 +147,9 @@ describe('@auraaihq/ai-bridge', () => {
     it('throws BridgeError(aggregate) with cause holding chain', async () => {
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({ id: 'a', throwCode: 'rate_limit' }),
-          createDummyAdapter({ id: 'b', throwCode: 'timeout' }),
-          createDummyAdapter({ id: 'c', throwCode: 'network' }),
+          createInProcessAdapter({ id: 'a', throwCode: 'rate_limit' }),
+          createInProcessAdapter({ id: 'b', throwCode: 'timeout' }),
+          createInProcessAdapter({ id: 'c', throwCode: 'network' }),
         ],
         primary: 'a',
         fallback: ['b', 'c'],
@@ -176,7 +176,7 @@ describe('@auraaihq/ai-bridge', () => {
     ] as const)('classifies "%s" as unknown AdapterError', async (_label, thrown) => {
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({
+          createInProcessAdapter({
             id: 'a',
             respond: () => {
               throw thrown
@@ -196,7 +196,7 @@ describe('@auraaihq/ai-bridge', () => {
       const original = new Error('underlying')
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({
+          createInProcessAdapter({
             id: 'a',
             respond: () => {
               throw original
@@ -217,13 +217,13 @@ describe('@auraaihq/ai-bridge', () => {
       })
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({
+          createInProcessAdapter({
             id: 'a',
             respond: () => {
               throw fakeAdapterError
             },
           }),
-          createDummyAdapter({ id: 'b', text: 'fallback worked' }),
+          createInProcessAdapter({ id: 'b', text: 'fallback worked' }),
         ],
         primary: 'a',
         fallback: ['b'],
@@ -258,8 +258,8 @@ describe('@auraaihq/ai-bridge', () => {
       }
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({ id: 'a', text: 'a' }),
-          createDummyAdapter({ id: 'b', text: 'b' }),
+          createInProcessAdapter({ id: 'a', text: 'a' }),
+          createInProcessAdapter({ id: 'b', text: 'b' }),
         ],
         policy,
       })
@@ -270,7 +270,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('rejects empty order from policy', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a' })],
+        adapters: [createInProcessAdapter({ id: 'a' })],
         policy: { pickOrder: () => [] },
       })
       const err = await bridge.complete('hi').catch((e) => e)
@@ -280,7 +280,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('throws BridgeError(unknown_adapter) when policy returns id not in adapters', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a', text: 'a' })],
+        adapters: [createInProcessAdapter({ id: 'a', text: 'a' })],
         policy: { pickOrder: () => ['nope', 'a'] },
       })
       const err = await bridge.complete('hi').catch((e) => e)
@@ -290,7 +290,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('throws BridgeError(duplicate_in_order) when policy returns duplicates', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a' })],
+        adapters: [createInProcessAdapter({ id: 'a' })],
         policy: { pickOrder: () => ['a', 'a'] },
       })
       const err = await bridge.complete('hi').catch((e) => e)
@@ -300,7 +300,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('wraps thrown policy error in BridgeError(policy_error)', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a', text: 'a' })],
+        adapters: [createInProcessAdapter({ id: 'a', text: 'a' })],
         policy: {
           pickOrder: () => {
             throw new Error('policy bug')
@@ -317,7 +317,7 @@ describe('@auraaihq/ai-bridge', () => {
   describe('completeDetailed', () => {
     it('returns full CompleteResult with adapterId set by bridge', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'tracker', text: 'hi' })],
+        adapters: [createInProcessAdapter({ id: 'tracker', text: 'hi' })],
       })
       const result = await bridge.completeDetailed('prompt')
       expect(result.text).toBe('hi')
@@ -327,7 +327,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('overrides adapter-self-set adapterId with the actually-selected one', async () => {
       // Adapter sets a misleading adapterId; bridge corrects it.
-      const sneaky = createDummyAdapter({
+      const sneaky = createInProcessAdapter({
         id: 'real-id',
         respond: () => 'response',
       })
@@ -348,7 +348,7 @@ describe('@auraaihq/ai-bridge', () => {
   describe('AbortSignal propagation', () => {
     it('respects abort signal already aborted at entry', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a', text: 'never reached' })],
+        adapters: [createInProcessAdapter({ id: 'a', text: 'never reached' })],
       })
       const ctrl = new AbortController()
       ctrl.abort()
@@ -359,7 +359,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('respects abort signal during latency', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'slow', latencyMs: 100, text: 'late' })],
+        adapters: [createInProcessAdapter({ id: 'slow', latencyMs: 100, text: 'late' })],
       })
       const ctrl = new AbortController()
       const promise = bridge.complete('hi', { signal: ctrl.signal })
@@ -373,7 +373,7 @@ describe('@auraaihq/ai-bridge', () => {
       let fallbackCalls = 0
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({
+          createInProcessAdapter({
             id: 'a',
             respond: () => {
               primaryCalls += 1
@@ -381,7 +381,7 @@ describe('@auraaihq/ai-bridge', () => {
               throw new AdapterError('rate_limit', 'rate limited', 'a')
             },
           }),
-          createDummyAdapter({
+          createInProcessAdapter({
             id: 'b',
             respond: () => {
               fallbackCalls += 1
@@ -409,7 +409,7 @@ describe('@auraaihq/ai-bridge', () => {
       const ctrl = new AbortController()
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({
+          createInProcessAdapter({
             id: 'ignores-signal',
             respond: () => {
               ctrl.abort()  // caller cancels mid-request
@@ -428,7 +428,7 @@ describe('@auraaihq/ai-bridge', () => {
   describe('AbortSignal.reason preservation', () => {
     it('passes signal.reason as cause when aborting before routing', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a', text: 'x' })],
+        adapters: [createInProcessAdapter({ id: 'a', text: 'x' })],
       })
       const reason = new Error('user cancelled')
       const ctrl = new AbortController()
@@ -444,14 +444,14 @@ describe('@auraaihq/ai-bridge', () => {
       const reason = new Error('mid-flight cancel')
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({
+          createInProcessAdapter({
             id: 'a',
             respond: () => {
               ctrl.abort(reason)
               throw new AdapterError('rate_limit', 'rl', 'a')
             },
           }),
-          createDummyAdapter({ id: 'b', text: 'never' }),
+          createInProcessAdapter({ id: 'b', text: 'never' }),
         ],
         primary: 'a',
         fallback: ['b'],
@@ -477,14 +477,14 @@ describe('@auraaihq/ai-bridge', () => {
           })
         })
       }
-      const adapter = createDummyAdapter({
+      const adapter = createInProcessAdapter({
         id: 'serial',
         respond: slowResolve,
         metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number }> & Partial<{ id: string; name: string; provider: string; local: boolean }>,
       })
-      // Override metadata to set maxConcurrency=1 (createDummyAdapter
+      // Override metadata to set maxConcurrency=1 (createInProcessAdapter
       // accepts metadata partial overrides).
-      // (NB: createDummyAdapter spreads defaults + metadata; this works.)
+      // (NB: createInProcessAdapter spreads defaults + metadata; this works.)
       const bridge = createBridge({ adapters: [adapter] })
 
       const p1 = bridge.complete('a')
@@ -513,7 +513,7 @@ describe('@auraaihq/ai-bridge', () => {
       let inFlight = 0
       let observedMax = 0
       const releases: Array<() => void> = []
-      const adapter = createDummyAdapter({
+      const adapter = createInProcessAdapter({
         id: 'unlimited',
         respond: () => {
           inFlight += 1
@@ -538,6 +538,52 @@ describe('@auraaihq/ai-bridge', () => {
       releases.forEach((r) => r())
       await Promise.all([p1, p2, p3])
     })
+
+    it('rejects invalid maxConcurrency at construction', () => {
+      const adapter = createInProcessAdapter({
+        id: 'badcfg',
+        metadata: { maxConcurrency: NaN } as Partial<{ maxConcurrency: number }>,
+      })
+      expect(() => createBridge({ adapters: [adapter] })).toThrow(/maxConcurrency/)
+    })
+
+    it('aborts queued waiters when their signal fires (no slot waste)', async () => {
+      const releases: Array<() => void> = []
+      let invokeCount = 0
+      const adapter = createInProcessAdapter({
+        id: 'serial',
+        metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number }>,
+        respond: () => {
+          invokeCount += 1
+          return new Promise<string>((resolve) => {
+            releases.push(() => resolve('done'))
+          })
+        },
+      })
+      const bridge = createBridge({ adapters: [adapter] })
+
+      // First call holds the only slot.
+      const p1 = bridge.complete('first')
+      // Let the first acquire happen.
+      await new Promise<void>((r) => setImmediate(r))
+      expect(invokeCount).toBe(1)
+
+      // Second call queued behind it.
+      const ctrl = new AbortController()
+      const p2 = bridge.complete('second', { signal: ctrl.signal })
+
+      // Abort the queued call before its slot opens.
+      ctrl.abort()
+      const err = await p2.catch((e) => e)
+      expect(err).toBeInstanceOf(AdapterError)
+      expect(err.code).toBe('aborted')
+      // Adapter must not have been called for the aborted request.
+      expect(invokeCount).toBe(1)
+
+      // Drain the first call.
+      releases[0]!()
+      await p1
+    })
   })
 
   describe('log injection defense', () => {
@@ -548,7 +594,7 @@ describe('@auraaihq/ai-bridge', () => {
       const err = (() => {
         try {
           createBridge({
-            adapters: [createDummyAdapter({ id: 'a' })],
+            adapters: [createInProcessAdapter({ id: 'a' })],
             primary: evilId,
           })
         } catch (e) {
@@ -565,7 +611,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('sanitizes thrown policy message', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a' })],
+        adapters: [createInProcessAdapter({ id: 'a' })],
         policy: {
           pickOrder: () => {
             throw new Error('attack\nlog\rforge')
@@ -585,8 +631,8 @@ describe('@auraaihq/ai-bridge', () => {
       const liveOrder: string[] = ['a', 'b']
       const bridge = createBridge({
         adapters: [
-          createDummyAdapter({ id: 'a', text: 'A' }),
-          createDummyAdapter({ id: 'b', text: 'B' }),
+          createInProcessAdapter({ id: 'a', text: 'A' }),
+          createInProcessAdapter({ id: 'b', text: 'B' }),
         ],
         policy: {
           pickOrder: () => {
@@ -606,7 +652,7 @@ describe('@auraaihq/ai-bridge', () => {
   describe('API ergonomics', () => {
     it('complete works when destructured from bridge (no this binding)', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a', text: 'unbound-ok' })],
+        adapters: [createInProcessAdapter({ id: 'a', text: 'unbound-ok' })],
       })
       // Common consumer pattern: pull complete out as a plain function.
       const { complete } = bridge
@@ -616,7 +662,7 @@ describe('@auraaihq/ai-bridge', () => {
 
     it('completeDetailed also works when destructured', async () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a', text: 'unbound' })],
+        adapters: [createInProcessAdapter({ id: 'a', text: 'unbound' })],
       })
       const { completeDetailed } = bridge
       const result = await completeDetailed('hi')
@@ -628,16 +674,110 @@ describe('@auraaihq/ai-bridge', () => {
   describe('introspection', () => {
     it('exposes adapterIds', () => {
       const bridge = createBridge({
-        adapters: [createDummyAdapter({ id: 'a' }), createDummyAdapter({ id: 'b' })],
+        adapters: [createInProcessAdapter({ id: 'a' }), createInProcessAdapter({ id: 'b' })],
       })
       expect([...bridge.adapterIds].sort()).toEqual(['a', 'b'])
     })
 
+    it('adapterIds is frozen (mutation rejected)', () => {
+      const bridge = createBridge({
+        adapters: [createInProcessAdapter({ id: 'a' })],
+      })
+      expect(Object.isFrozen(bridge.adapterIds)).toBe(true)
+    })
+
     it('getAdapter returns the adapter or undefined', () => {
-      const a = createDummyAdapter({ id: 'a' })
+      const a = createInProcessAdapter({ id: 'a' })
       const bridge = createBridge({ adapters: [a] })
       expect(bridge.getAdapter('a')).toBe(a)
       expect(bridge.getAdapter('nope')).toBeUndefined()
+    })
+  })
+
+  describe('safe error stringification', () => {
+    it('handles adapter throwing object whose toString itself throws', async () => {
+      const adversarial = {
+        toString() {
+          throw new Error('toString attack')
+        },
+      }
+      const bridge = createBridge({
+        adapters: [
+          createInProcessAdapter({
+            id: 'a',
+            respond: () => {
+              throw adversarial
+            },
+          }),
+        ],
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(AdapterError)
+      expect(err.code).toBe('unknown')
+      // Should not have crashed; some defensive string is present.
+      expect(typeof err.message).toBe('string')
+    })
+
+    it('handles policy throwing object whose toString itself throws', async () => {
+      const bridge = createBridge({
+        adapters: [createInProcessAdapter({ id: 'a' })],
+        policy: {
+          pickOrder: () => {
+            const evil = {
+              toString() {
+                throw new Error('attack')
+              },
+            }
+            // Throw a non-Error so we hit safeToString path
+            throw evil as unknown as Error
+          },
+        },
+      })
+      const err = await bridge.complete('hi').catch((e) => e)
+      expect(err).toBeInstanceOf(BridgeError)
+      expect((err as BridgeError).code).toBe('policy_error')
+      expect(typeof err.message).toBe('string')
+    })
+  })
+
+  describe('per-adapter-instance concurrency (WeakMap)', () => {
+    it('shares concurrency limit when same adapter is registered with two bridges', async () => {
+      let inFlight = 0
+      let observedMax = 0
+      const releases: Array<() => void> = []
+      const adapter = createInProcessAdapter({
+        id: 'shared',
+        metadata: { maxConcurrency: 1 } as Partial<{ maxConcurrency: number }>,
+        respond: () => {
+          inFlight += 1
+          observedMax = Math.max(observedMax, inFlight)
+          return new Promise<string>((resolve) => {
+            releases.push(() => {
+              inFlight -= 1
+              resolve('done')
+            })
+          })
+        },
+      })
+
+      // Two bridges share the same adapter object.
+      const bridgeA = createBridge({ adapters: [adapter] })
+      const bridgeB = createBridge({ adapters: [adapter] })
+
+      const p1 = bridgeA.complete('a')
+      const p2 = bridgeB.complete('b')
+
+      await new Promise<void>((r) => setImmediate(r))
+      // Despite two bridges, observed concurrency stays at 1.
+      expect(observedMax).toBe(1)
+
+      // Drain.
+      while (releases.length > 0) {
+        releases.shift()!()
+        await new Promise<void>((r) => setImmediate(r))
+      }
+      await Promise.all([p1, p2])
+      expect(observedMax).toBe(1)
     })
   })
 })
@@ -694,34 +834,34 @@ describe('@auraaihq/ai-bridge isAdapterError', () => {
   })
 })
 
-describe('@auraaihq/ai-bridge dummy adapter', () => {
+describe('@auraaihq/ai-bridge in-process adapter', () => {
   it('returns text from `text` option', async () => {
-    const a = createDummyAdapter({ text: 'hello' })
+    const a = createInProcessAdapter({ text: 'hello' })
     const result = await a.complete('prompt')
     expect(result.text).toBe('hello')
   })
 
   it('returns text from `respond` callback', async () => {
-    const a = createDummyAdapter({ respond: (p) => p.toUpperCase() })
+    const a = createInProcessAdapter({ respond: (p) => p.toUpperCase() })
     const result = await a.complete('hi there')
     expect(result.text).toBe('HI THERE')
   })
 
   it('uses default templated text when nothing provided', async () => {
-    const a = createDummyAdapter({ id: 'd' })
+    const a = createInProcessAdapter({ id: 'd' })
     const result = await a.complete('q')
-    expect(result.text).toBe('[dummy d] q')
+    expect(result.text).toBe('[d] q')
   })
 
   it('throws AdapterError with the configured code', async () => {
-    const a = createDummyAdapter({ throwCode: 'rate_limit' })
+    const a = createInProcessAdapter({ throwCode: 'rate_limit' })
     const err = await a.complete('hi').catch((e) => e)
     expect(err).toBeInstanceOf(AdapterError)
     expect(err.code).toBe('rate_limit')
   })
 
   it('reports usage tokens (rough estimate)', async () => {
-    const a = createDummyAdapter({ text: 'response' })
+    const a = createInProcessAdapter({ text: 'response' })
     const result = await a.complete('input prompt')
     expect(result.usage?.promptTokens).toBe(Math.ceil('input prompt'.length / 4))
     expect(result.usage?.completionTokens).toBe(Math.ceil('response'.length / 4))
@@ -732,7 +872,7 @@ describe('@auraaihq/ai-bridge dummy adapter', () => {
     try {
       const ctrl = new AbortController()
       ctrl.abort()
-      const a = createDummyAdapter({ latencyMs: 5000, text: 'unreachable' })
+      const a = createInProcessAdapter({ latencyMs: 5000, text: 'unreachable' })
       // Don't await yet — we want to assert it settles WITHOUT advancing timers.
       const promise = a.complete('hi', { signal: ctrl.signal })
       const err = await promise.catch((e) => e)
@@ -749,7 +889,7 @@ describe('@auraaihq/ai-bridge dummy adapter', () => {
     const addSpy = vi.spyOn(ctrl.signal, 'addEventListener')
     const removeSpy = vi.spyOn(ctrl.signal, 'removeEventListener')
 
-    const a = createDummyAdapter({ latencyMs: 10, text: 'ok' })
+    const a = createInProcessAdapter({ latencyMs: 10, text: 'ok' })
     const result = await a.complete('hi', { signal: ctrl.signal })
     expect(result.text).toBe('ok')
 
@@ -766,7 +906,7 @@ describe('@auraaihq/ai-bridge dummy adapter', () => {
     // the addEventListener call and the timer's tick. With pre-check
     // only, this could miss; with post-check, it must catch.
     const ctrl = new AbortController()
-    const a = createDummyAdapter({ latencyMs: 50, text: 'unreachable' })
+    const a = createInProcessAdapter({ latencyMs: 50, text: 'unreachable' })
     // Schedule abort to fire on the next microtask (after the listener
     // has been attached but possibly before the AbortController would
     // synchronously dispatch).
