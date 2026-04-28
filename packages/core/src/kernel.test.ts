@@ -30,6 +30,7 @@ function makeModule(
     manifest: {
       id,
       version: '0.1.0',
+      sdkVersion: '0.1.0',
       name: id,
       description: `test module ${id}`,
       permissions: options.permissions ?? [],
@@ -134,6 +135,152 @@ describe('@auraaihq/core kernel', () => {
       await kernel.load('a')
       await kernel.load('a') // second call should be no-op
       expect(onLoad).toHaveBeenCalledOnce()
+    })
+
+    it('re-load of failed module rethrows captured error (no silent retry)', async () => {
+      let attempts = 0
+      kernel.register(
+        makeModule('bad', {
+          onLoad: () => {
+            attempts += 1
+            throw new Error('boom')
+          },
+        }),
+      )
+      await expect(kernel.load('bad')).rejects.toThrow('boom')
+      // Second call should NOT call onLoad again — it should re-throw
+      // the captured error.
+      await expect(kernel.load('bad')).rejects.toThrow('boom')
+      expect(attempts).toBe(1)
+    })
+
+    it('retry() resets failed state, allowing fresh load attempt', async () => {
+      let attempts = 0
+      let shouldFail = true
+      kernel.register(
+        makeModule('flaky', {
+          onLoad: () => {
+            attempts += 1
+            if (shouldFail) throw new Error('first time')
+          },
+        }),
+      )
+      await expect(kernel.load('flaky')).rejects.toThrow()
+      // Reset and retry — onLoad runs again, this time succeeds.
+      shouldFail = false
+      kernel.retry('flaky')
+      expect(kernel.list().get('flaky')?.state).toBe('registered')
+      await kernel.load('flaky')
+      expect(kernel.list().get('flaky')?.state).toBe('loaded')
+      expect(attempts).toBe(2)
+    })
+
+    it('retry() throws UnknownModuleError for unregistered id', () => {
+      expect(() => kernel.retry('nope')).toThrow(/unknown module/)
+    })
+
+    it('retry() is no-op for non-failed modules', async () => {
+      kernel.register(makeModule('a'))
+      await kernel.load('a')
+      expect(() => kernel.retry('a')).not.toThrow()
+      expect(kernel.list().get('a')?.state).toBe('loaded')
+    })
+
+    it('concurrent load() calls for same id coalesce into one', async () => {
+      let onLoadCalls = 0
+      kernel.register(
+        makeModule('slow', {
+          onLoad: async () => {
+            onLoadCalls += 1
+            // small delay so the second call observes the first in-flight
+            await new Promise((r) => setTimeout(r, 10))
+          },
+        }),
+      )
+      const [r1, r2, r3] = await Promise.all([
+        kernel.load('slow'),
+        kernel.load('slow'),
+        kernel.load('slow'),
+      ])
+      expect(onLoadCalls).toBe(1)
+      expect(r1.state).toBe('loaded')
+      expect(r2.state).toBe('loaded')
+      expect(r3.state).toBe('loaded')
+    })
+  })
+
+  describe('sdkVersion validation', () => {
+    it('accepts compatible sdkVersion', () => {
+      const mod = makeModule('compat')
+      // makeModule sets sdkVersion: '0.1.0' which matches kernel's '0.1' range
+      expect(() => kernel.register(mod)).not.toThrow()
+    })
+
+    it('accepts caret-prefixed sdkVersion', () => {
+      const mod = defineModule({
+        manifest: {
+          id: 'caret',
+          version: '0.0.0',
+          sdkVersion: '^0.1.5',
+          name: 'caret',
+          description: '',
+          permissions: [],
+        },
+        async load() {},
+        async unload() {},
+        async invoke() {
+          return { ok: true, data: null }
+        },
+      })
+      expect(() => kernel.register(mod)).not.toThrow()
+    })
+
+    it('rejects incompatible sdkVersion (different major.minor)', () => {
+      const mod = defineModule({
+        manifest: {
+          id: 'incompat',
+          version: '0.0.0',
+          sdkVersion: '2.0.0',
+          name: 'incompat',
+          description: '',
+          permissions: [],
+        },
+        async load() {},
+        async unload() {},
+        async invoke() {
+          return { ok: true, data: null }
+        },
+      })
+      expect(() => kernel.register(mod)).toThrow(/sdkVersion/)
+    })
+
+    it('warns but accepts module without sdkVersion declaration', () => {
+      const calls: string[] = []
+      const k = createKernel({
+        memory,
+        log: {
+          debug: () => {},
+          info: () => {},
+          warn: (msg) => calls.push(String(msg)),
+          error: () => {},
+        },
+      })
+      const mod = defineModule({
+        manifest: {
+          id: 'legacy',
+          version: '0.0.0',
+          name: 'legacy',
+          description: '',
+          permissions: [],
+        },
+        async load() {},
+        async unload() {},
+        async invoke() {
+          return { ok: true, data: null }
+        },
+      })
+      expect(() => k.register(mod)).not.toThrow()
+      expect(calls.some((m) => m.includes('sdkVersion'))).toBe(true)
     })
   })
 
@@ -261,8 +408,10 @@ describe('@auraaihq/core kernel', () => {
         }),
       )
       await kernel.load('m')
-      // Verify the underlying memory got the namespaced row
-      expect(memory.get('m:test')).toBe(1)
+      // Verify the underlying memory got the namespaced row by going
+      // through the same namespace (root memory.get('m:test') would
+      // throw since keys can't contain ':').
+      expect(memory.namespace('m').get('test')).toBe(1)
       // And the module's view sees it under its own key
       expect(capturedMem!.get('test')).toBe(1)
     })
@@ -278,7 +427,9 @@ describe('@auraaihq/core kernel', () => {
         }),
       )
       await kernel.load('readonly')
-      memory.set('readonly:seed', 'hello')
+      // Seed via the underlying namespaced memory (direct ':' keys
+      // on root are now rejected to prevent collision footguns).
+      memory.namespace('readonly').set('seed', 'hello')
       expect(capturedMem.get('seed')).toBe('hello')
       expect(() => capturedMem.set('x', 1)).toThrow(/memory:write/)
       expect(() => capturedMem.delete('x')).toThrow(/memory:write/)
@@ -322,6 +473,95 @@ describe('@auraaihq/core kernel', () => {
       await kernel.loadAll()
       // Should not throw
       await expect(kernel.shutdown()).resolves.toBeUndefined()
+    })
+
+    it('idempotent: second shutdown is no-op', async () => {
+      kernel.register(makeModule('a'))
+      await kernel.loadAll()
+      await kernel.shutdown()
+      await expect(kernel.shutdown()).resolves.toBeUndefined()
+    })
+
+    it('rejects new register/load/loadAll after shutdown started', async () => {
+      kernel.register(makeModule('a'))
+      await kernel.shutdown()
+      expect(() => kernel.register(makeModule('b'))).toThrow(/shutting down/)
+      await expect(kernel.load('a')).rejects.toThrow(/shutting down/)
+      await expect(kernel.loadAll()).rejects.toThrow(/shutting down/)
+    })
+
+    it('waits for in-flight load to settle before unloading', async () => {
+      let phase = 'idle'
+      kernel.register(
+        makeModule('slow', {
+          onLoad: async () => {
+            phase = 'loading'
+            await new Promise((r) => setTimeout(r, 30))
+            phase = 'loaded'
+          },
+        }),
+      )
+      const loadPromise = kernel.load('slow')
+      // Start shutdown while load is in flight.
+      const shutdownPromise = kernel.shutdown()
+      await Promise.all([loadPromise.catch(() => {}), shutdownPromise])
+      // After shutdown, the slow module should have either finished
+      // loading then been unloaded, OR been kept in 'loading'/'failed'
+      // — but never in a mid-state at shutdown's resolution.
+      const final = kernel.list().get('slow')?.state
+      expect(['unloaded', 'loaded', 'failed'].includes(final ?? '')).toBe(true)
+    })
+  })
+
+  describe('ModuleContext stability (per SDK contract)', () => {
+    it('same ctx instance is reused across invoke() calls', async () => {
+      const observed: unknown[] = []
+      kernel.register(
+        makeModule('m', {
+          permissions: ['memory:read', 'memory:write'],
+          onInvoke: async (_intent, ctx) => {
+            observed.push(ctx)
+            return { ok: true, data: null }
+          },
+        }),
+      )
+      await kernel.load('m')
+      await kernel.invoke('m', { kind: 'a', payload: null })
+      await kernel.invoke('m', { kind: 'b', payload: null })
+      await kernel.invoke('m', { kind: 'c', payload: null })
+      expect(observed).toHaveLength(3)
+      // All three invokes saw the SAME ctx reference.
+      expect(observed[0]).toBe(observed[1])
+      expect(observed[1]).toBe(observed[2])
+    })
+
+    it('ctx passed to load() is the same one passed to invoke()', async () => {
+      let loadCtx: unknown
+      let invokeCtx: unknown
+      kernel.register(
+        makeModule('m', {
+          permissions: ['memory:read'],
+          onLoad: (ctx) => {
+            loadCtx = ctx
+          },
+          onInvoke: async (_intent, ctx) => {
+            invokeCtx = ctx
+            return { ok: true, data: null }
+          },
+        }),
+      )
+      await kernel.load('m')
+      await kernel.invoke('m', { kind: 'x', payload: null })
+      expect(loadCtx).toBe(invokeCtx)
+    })
+
+    it('ctx is cleared after unload, so post-unload invoke fails clean', async () => {
+      kernel.register(makeModule('m'))
+      await kernel.load('m')
+      await kernel.unload('m')
+      await expect(
+        kernel.invoke('m', { kind: 'x', payload: null }),
+      ).rejects.toThrow(/not loaded/)
     })
   })
 })
