@@ -115,16 +115,28 @@ export class AdapterError extends Error {
  * bundling pitfalls). Prefer this over `instanceof AdapterError` in the
  * bridge — `instanceof` returns false when the AdapterError comes from
  * a different copy of this module.
+ *
+ * The primary discriminator is `code ∈ AdapterErrorCode`. We accept
+ * either `name === 'AdapterError'` (the canonical case) or a missing
+ * name (after minification) so a recognizable error code from a
+ * structurally compatible object still classifies. Plain Errors
+ * without a recognized `code` are explicitly rejected.
  */
 export function isAdapterError(value: unknown): value is AdapterError {
   if (!value || typeof value !== 'object') return false
   const v = value as { name?: unknown; code?: unknown; message?: unknown }
-  return (
-    v.name === 'AdapterError' &&
-    typeof v.message === 'string' &&
-    typeof v.code === 'string' &&
-    isKnownErrorCode(v.code)
-  )
+  if (typeof v.message !== 'string') return false
+  if (typeof v.code !== 'string') return false
+  if (!isKnownErrorCode(v.code)) return false
+  // name is optional — allow either 'AdapterError' or absent/empty
+  // (minifiers/realm boundaries may strip class names). Reject when
+  // it's set to something unrelated like 'TypeError' to avoid false
+  // positives where someone accidentally hung a `code` property on a
+  // standard Error.
+  if (v.name !== undefined && v.name !== '' && v.name !== 'AdapterError') {
+    return false
+  }
+  return true
 }
 
 const KNOWN_ERROR_CODES = new Set<string>([

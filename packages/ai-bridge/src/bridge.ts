@@ -100,8 +100,13 @@ export type BridgeErrorCode =
   | 'unsupported_method'
 
 /**
- * Errors thrown by the bridge itself (not by adapters). Adapter errors
- * propagate as `AdapterError` after the fallback chain is exhausted.
+ * Errors thrown by the bridge itself (not by adapters).
+ *
+ * - Adapter-level errors that surface immediately are thrown as
+ *   `AdapterError` (with `code` like `'auth'` etc.).
+ * - When every adapter in a routing chain fails recoverably, the
+ *   bridge throws `BridgeError(code: 'aggregate')` with the chain
+ *   of underlying `AdapterError`s in `cause`.
  *
  * `cause` is non-enumerable to avoid accidental serialization of
  * underlying request/response bodies that may contain secrets.
@@ -134,12 +139,12 @@ const CROSS_ADAPTER_RECOVERABLE: ReadonlySet<AdapterErrorCode> = new Set([
 ])
 
 /**
- * Dedupe an order list while preserving first-seen position. Throws
- * BridgeError if a duplicate is found — calling the same adapter
- * twice in one request is almost always unintended (double-spend
- * against rate limits / cost) and easy to mis-author.
+ * Reject a routing order that contains the same adapter id twice.
+ * Calling the same adapter twice in one request is almost always
+ * unintended (double-spend against rate limits / cost) and easy to
+ * mis-author.
  */
-function dedupeOrder(order: readonly string[]): readonly string[] {
+function assertNoDuplicateIds(order: readonly string[]): readonly string[] {
   const seen = new Set<string>()
   for (const id of order) {
     if (seen.has(id)) {
@@ -197,7 +202,7 @@ export function createBridge(options: BridgeOptions): Bridge {
         )
       }
     }
-    defaultOrder = dedupeOrder([primary, ...fallback])
+    defaultOrder = assertNoDuplicateIds([primary, ...fallback])
   }
 
   /**
@@ -211,14 +216,18 @@ export function createBridge(options: BridgeOptions): Bridge {
     order: readonly string[],
   ): Promise<CompleteResult> {
     const errors: AdapterError[] = []
+    let lastAttemptedId: string | undefined
     for (const id of order) {
       // Honor abort between adapters. If user aborted after the
-      // primary call returned, don't start the fallback.
+      // primary call returned, don't start the fallback. Attribute
+      // the abort to the LAST adapter we actually tried (or omit
+      // adapterId if we never started one) — not the next adapter
+      // we never reached.
       if (completeOptions?.signal?.aborted) {
         throw new AdapterError(
           'aborted',
-          'request aborted before next adapter',
-          id,
+          'request aborted between adapters',
+          lastAttemptedId,
         )
       }
       const adapter = adapterMap.get(id)
@@ -229,6 +238,7 @@ export function createBridge(options: BridgeOptions): Bridge {
           `routing order contains unknown adapter id: '${id}'`,
         )
       }
+      lastAttemptedId = id
       try {
         const result = await adapter.complete(prompt, completeOptions)
         return { ...result, adapterId: id }
@@ -251,6 +261,41 @@ export function createBridge(options: BridgeOptions): Bridge {
     )
   }
 
+  // Define completeDetailed as a closure so the public API works
+  // even when destructured (e.g. `const { complete } = bridge`).
+  // Avoid `this`-coupling.
+  async function completeDetailed(
+    prompt: string,
+    options?: CompleteOptions,
+  ): Promise<CompleteResult> {
+    // Early abort check — don't run policy if the caller already gave up.
+    if (options?.signal?.aborted) {
+      throw new AdapterError('aborted', 'request aborted before routing')
+    }
+
+    let order: readonly string[]
+    if (policy) {
+      try {
+        order = policy.pickOrder(prompt, options, [...adapterMap.keys()])
+      } catch (error) {
+        throw new BridgeError(
+          'policy_error',
+          `routing policy threw: ${error instanceof Error ? error.message : String(error)}`,
+          error,
+        )
+      }
+      if (order.length === 0) {
+        throw new BridgeError('no_adapters', 'routing policy returned empty order')
+      }
+      // Policy-supplied orders may also contain duplicates; reject loudly.
+      order = assertNoDuplicateIds(order)
+    } else {
+      order = defaultOrder
+    }
+
+    return tryAdapters(prompt, options, order)
+  }
+
   const bridge: Bridge = {
     adapterIds: [...adapterMap.keys()],
 
@@ -258,38 +303,11 @@ export function createBridge(options: BridgeOptions): Bridge {
       return adapterMap.get(id)
     },
 
+    completeDetailed,
+
     async complete(prompt, opts) {
-      const result = await this.completeDetailed(prompt, opts)
+      const result = await completeDetailed(prompt, opts)
       return result.text
-    },
-
-    async completeDetailed(prompt, options) {
-      // Early abort check — don't run policy if the caller already gave up.
-      if (options?.signal?.aborted) {
-        throw new AdapterError('aborted', 'request aborted before routing')
-      }
-
-      let order: readonly string[]
-      if (policy) {
-        try {
-          order = policy.pickOrder(prompt, options, [...adapterMap.keys()])
-        } catch (error) {
-          throw new BridgeError(
-            'policy_error',
-            `routing policy threw: ${error instanceof Error ? error.message : String(error)}`,
-            error,
-          )
-        }
-        if (order.length === 0) {
-          throw new BridgeError('no_adapters', 'routing policy returned empty order')
-        }
-        // Policy-supplied orders may also contain duplicates; dedupe + reject.
-        order = dedupeOrder(order)
-      } else {
-        order = defaultOrder
-      }
-
-      return tryAdapters(prompt, options, order)
     },
   }
 

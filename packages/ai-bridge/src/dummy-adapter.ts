@@ -35,8 +35,12 @@ const defaultMetadata: AdapterMetadata = {
 /**
  * Sleep for `ms`, rejecting early on abort. Always cleans up the
  * timer + abort listener — no leaks even on the success path.
- * Pre-checks `signal.aborted` so an already-aborted request doesn't
- * waste real wall-clock time.
+ *
+ * Race-safety: attaches the abort listener BEFORE the post-attach
+ * `aborted` re-check, so an abort fired between the constructor's
+ * synchronous body and the listener wiring is still caught (the
+ * re-check sees it). Pre-checks `signal.aborted` to skip real
+ * wall-clock time when the caller is already aborted.
  */
 function abortableDelay(ms: number, signal: AbortSignal | undefined, adapterId: string): Promise<void> {
   if (signal?.aborted) {
@@ -44,7 +48,10 @@ function abortableDelay(ms: number, signal: AbortSignal | undefined, adapterId: 
   }
   return new Promise<void>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined
+    let settled = false
     const cleanup = (): void => {
+      if (settled) return
+      settled = true
       if (timer !== undefined) clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
     }
@@ -52,11 +59,24 @@ function abortableDelay(ms: number, signal: AbortSignal | undefined, adapterId: 
       cleanup()
       reject(new AdapterError('aborted', 'aborted by signal', adapterId))
     }
+
+    // Attach listener FIRST so any abort during construction is caught.
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    // Re-check synchronously: if abort fired between the pre-check
+    // (above) and now, fire the listener manually and bail. Some
+    // AbortSignal impls dispatch synchronously via .abort(), but
+    // listeners added after .abort() do NOT auto-fire — we have to
+    // detect it ourselves here.
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+
     timer = setTimeout(() => {
       cleanup()
       resolve()
     }, ms)
-    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 

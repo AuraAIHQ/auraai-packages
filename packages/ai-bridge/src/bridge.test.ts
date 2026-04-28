@@ -392,11 +392,35 @@ describe('@auraaihq/ai-bridge', () => {
         primary: 'a',
         fallback: ['b'],
       })
-      await expect(bridge.complete('hi', { signal: ctrl.signal })).rejects.toMatchObject({
-        code: 'aborted',
-      })
+      const err = await bridge.complete('hi', { signal: ctrl.signal }).catch((e) => e)
+      expect(err.code).toBe('aborted')
+      // Abort attribution: should be the LAST adapter actually attempted
+      // (primary 'a'), not the next one we would have tried ('b').
+      expect(err.adapterId).toBe('a')
       expect(primaryCalls).toBe(1)
       expect(fallbackCalls).toBe(0)
+    })
+  })
+
+  describe('API ergonomics', () => {
+    it('complete works when destructured from bridge (no this binding)', async () => {
+      const bridge = createBridge({
+        adapters: [createDummyAdapter({ id: 'a', text: 'unbound-ok' })],
+      })
+      // Common consumer pattern: pull complete out as a plain function.
+      const { complete } = bridge
+      const text = await complete('hi')
+      expect(text).toBe('unbound-ok')
+    })
+
+    it('completeDetailed also works when destructured', async () => {
+      const bridge = createBridge({
+        adapters: [createDummyAdapter({ id: 'a', text: 'unbound' })],
+      })
+      const { completeDetailed } = bridge
+      const result = await completeDetailed('hi')
+      expect(result.text).toBe('unbound')
+      expect(result.adapterId).toBe('a')
     })
   })
 
@@ -428,6 +452,25 @@ describe('@auraaihq/ai-bridge isAdapterError', () => {
       code: 'timeout' as AdapterErrorCode,
     })
     expect(isAdapterError(fake)).toBe(true)
+  })
+
+  it('matches when name is missing (post-minification scenario)', () => {
+    // Minifier or realm boundary may strip the name. Accept as long
+    // as the code is a valid AdapterErrorCode.
+    const fake = { code: 'rate_limit' as AdapterErrorCode, message: 'msg' }
+    expect(isAdapterError(fake)).toBe(true)
+  })
+
+  it('matches when name is empty string', () => {
+    const fake = { name: '', code: 'network' as AdapterErrorCode, message: 'msg' }
+    expect(isAdapterError(fake)).toBe(true)
+  })
+
+  it('rejects when name is set to something unrelated', () => {
+    // Don't be fooled by random Errors that happened to get a `code`.
+    const fake = Object.assign(new TypeError('typeerr'), { code: 'rate_limit' })
+    fake.name = 'TypeError'
+    expect(isAdapterError(fake)).toBe(false)
   })
 
   it('rejects plain Errors', () => {
@@ -483,26 +526,52 @@ describe('@auraaihq/ai-bridge dummy adapter', () => {
     expect(result.usage?.completionTokens).toBe(Math.ceil('response'.length / 4))
   })
 
-  it('rejects immediately when signal already aborted (no latency wait)', async () => {
-    const ctrl = new AbortController()
-    ctrl.abort()
-    const a = createDummyAdapter({ latencyMs: 5000, text: 'unreachable' })
-    const start = Date.now()
-    const err = await a.complete('hi', { signal: ctrl.signal }).catch((e) => e)
-    const elapsed = Date.now() - start
-    expect(err).toBeInstanceOf(AdapterError)
-    expect(err.code).toBe('aborted')
-    expect(elapsed).toBeLessThan(100) // didn't wait for the 5s latency
+  it('rejects immediately when signal already aborted (deterministic, fake timers)', async () => {
+    vi.useFakeTimers()
+    try {
+      const ctrl = new AbortController()
+      ctrl.abort()
+      const a = createDummyAdapter({ latencyMs: 5000, text: 'unreachable' })
+      // Don't await yet — we want to assert it settles WITHOUT advancing timers.
+      const promise = a.complete('hi', { signal: ctrl.signal })
+      const err = await promise.catch((e) => e)
+      expect(err).toBeInstanceOf(AdapterError)
+      expect(err.code).toBe('aborted')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('cleans up abort listener on success path (no leak)', async () => {
+  it('cleans up abort listener on success path — listener add/remove balance', async () => {
+    // Track add/remove calls on the signal directly.
     const ctrl = new AbortController()
+    const addSpy = vi.spyOn(ctrl.signal, 'addEventListener')
+    const removeSpy = vi.spyOn(ctrl.signal, 'removeEventListener')
+
     const a = createDummyAdapter({ latencyMs: 10, text: 'ok' })
     const result = await a.complete('hi', { signal: ctrl.signal })
     expect(result.text).toBe('ok')
-    // After success, aborting should have no observable effect (the
-    // listener is gone). This test passes if we don't see unhandled
-    // rejections or stale-listener errors.
-    ctrl.abort()
+
+    // For each addEventListener('abort', …), there must be a matching
+    // removeEventListener('abort', …) — proving cleanup ran.
+    const adds = addSpy.mock.calls.filter((c) => c[0] === 'abort').length
+    const removes = removeSpy.mock.calls.filter((c) => c[0] === 'abort').length
+    expect(adds).toBeGreaterThan(0)
+    expect(removes).toBe(adds)
+  })
+
+  it('catches abort fired immediately after listener attach (race window)', async () => {
+    // This test exercises the post-attach re-check: we abort *between*
+    // the addEventListener call and the timer's tick. With pre-check
+    // only, this could miss; with post-check, it must catch.
+    const ctrl = new AbortController()
+    const a = createDummyAdapter({ latencyMs: 50, text: 'unreachable' })
+    // Schedule abort to fire on the next microtask (after the listener
+    // has been attached but possibly before the AbortController would
+    // synchronously dispatch).
+    queueMicrotask(() => ctrl.abort())
+    const err = await a.complete('hi', { signal: ctrl.signal }).catch((e) => e)
+    expect(err).toBeInstanceOf(AdapterError)
+    expect(err.code).toBe('aborted')
   })
 })
