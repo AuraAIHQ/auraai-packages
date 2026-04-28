@@ -39,12 +39,17 @@ export interface Memory {
    */
   has(key: string): boolean
   /**
-   * List keys in this namespace. If `prefix` is provided, returns only
-   * keys starting with `prefix` (the prefix itself is matched against
-   * the key portion, not the namespaced storage row).
+   * List keys directly in this namespace. If `prefix` is provided,
+   * returns only keys starting with `prefix` (matched against the
+   * key portion, not the underlying storage row).
    *
-   * If `prefix` is omitted or empty, returns all keys in the current
-   * namespace.
+   * If `prefix` is omitted or empty, returns all direct keys in the
+   * current namespace. Sub-namespace keys (those stored under a child
+   * created via `namespace()`) are excluded — use
+   * `namespace('child').list()` to inspect a child namespace's keys.
+   *
+   * All returned keys are safe to pass to `get()`, `set()`, and
+   * `delete()` on this same Memory instance.
    */
   list(prefix?: string): string[]
   /**
@@ -193,8 +198,13 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
       const userPrefix = prefix ?? ''
       const pattern = `${escapeLike(decodePrefix)}${escapeLike(userPrefix)}%`
       const rows = listStmt.all(pattern)
-      // Strip the namespace prefix to return user-facing keys
-      return rows.map((row) => row.ns_key.slice(decodePrefix.length))
+      // Strip the namespace prefix and exclude sub-namespace keys (those
+      // still containing ':' after stripping). Only direct keys of this
+      // namespace are returned; use namespace('child').list() to inspect
+      // a child namespace.
+      return rows
+        .map((row) => row.ns_key.slice(decodePrefix.length))
+        .filter((key) => !key.includes(NAMESPACE_SEPARATOR))
     },
 
     namespace(child: string): Memory {
@@ -266,7 +276,7 @@ function serializeValue(value: unknown): string {
  * const sub = mem.namespace('module-x')
  * sub.set('private', 'value')
  * sub.list()                       // ['private']
- * mem.list()                       // ['foo', 'module-x:private']
+ * mem.list()                       // ['foo']  — sub-namespace keys are excluded
  * mem.close()
  *
  * @remarks

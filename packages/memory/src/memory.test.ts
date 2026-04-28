@@ -184,15 +184,22 @@ describe('@auraaihq/memory L0', () => {
       expect(sub2.get('inner')).toBe('x')
     })
 
-    it('list() in root still sees the namespaced storage rows', () => {
+    it('list() in root excludes child namespace keys', () => {
       const sub = mem.namespace('sub')
       sub.set('x', 1)
       mem.set('y', 2)
-      // Root's list() returns the underlying storage keys (which DO
-      // contain ':' — those came from the namespaced storage layout,
-      // not from user input). Listing is read-only so the separator
-      // restriction doesn't apply here.
-      expect(mem.list().sort()).toEqual(['sub:x', 'y'])
+      // Only direct keys of the root namespace are returned.
+      // 'sub:x' lives in the 'sub' child namespace and is excluded.
+      // Use mem.namespace('sub').list() to inspect child keys.
+      expect(mem.list().sort()).toEqual(['y'])
+    })
+
+    it('list() in child namespace only returns that namespace\'s direct keys', () => {
+      const sub = mem.namespace('sub')
+      sub.set('x', 1)
+      sub.set('y', 2)
+      mem.set('root-key', 0)
+      expect(sub.list().sort()).toEqual(['x', 'y'])
     })
 
     it('nested namespaces compose with separator', () => {
