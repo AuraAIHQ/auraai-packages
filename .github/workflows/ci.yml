@@ -36,6 +36,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5
         with:
+          # Node 22 is our minimum supported version (engines: ">=22"). We pin
+          # to a single LTS version intentionally — the codebase uses Node 22
+          # APIs exclusively. A multi-version matrix can be added in M2 once
+          # module isolation is stable and third-party adapters need compat checks.
           node-version: '22'
           cache: 'pnpm'
 
