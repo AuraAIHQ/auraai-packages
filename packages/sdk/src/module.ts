@@ -206,14 +206,16 @@ export interface AIHandle {
  * Memory handle scoped to this module. The kernel passes a namespace-
  * isolated child of the global memory store so modules cannot collide.
  *
- * **Permission semantics**: declaring `memory:read` and/or `memory:write`
- * in `manifest.permissions` determines whether the kernel injects a
- * handle at all. Once a module has a handle, it carries full read/write
- * capability — the permission check happens at `load()` time (kernel
- * verifies the declaration), not on individual method calls. A module
- * declaring only `memory:read` still receives a full handle; the read-only
- * constraint is a social/auditing convention enforced by the kernel in M2+,
- * not a runtime restriction in M1.
+ * **Permission semantics**: the kernel injects a `MemoryHandle` only when
+ * `manifest.permissions` includes `memory:read` or `memory:write` (or both).
+ *
+ * - Declaring `memory:read` alone gives read-only access. Calling `set()` or
+ *   `delete()` on the handle **throws a runtime error** — enforced by the
+ *   kernel at M1, not deferred to a future release.
+ * - Declaring `memory:write` (with or without `memory:read`) gives full
+ *   read/write access.
+ * - The permission check is performed once at `load()` time; individual
+ *   method calls are guarded by the resulting access level.
  */
 export interface MemoryHandle {
   /** Read a value. Returns null when absent. */
