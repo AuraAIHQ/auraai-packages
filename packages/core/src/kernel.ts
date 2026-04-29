@@ -62,13 +62,6 @@ export interface ModuleRecord {
   readonly module: Module
   readonly state: 'registered' | 'loading' | 'loaded' | 'unloading' | 'unloaded' | 'failed'
   readonly error?: Error
-  /**
-   * The ModuleContext built at load time, reused for every subsequent
-   * invoke() per the SDK's "same ctx instance" contract. Cleared on
-   * unload. Internal — not part of the public API surface.
-   * @internal
-   */
-  readonly context?: ModuleContext
 }
 
 export interface KernelEvents {
@@ -268,6 +261,9 @@ function buildContext(
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
+// Internal record — extends the public ModuleRecord with the runtime context
+// that the kernel needs for invoke(). Never exposed through list() or load().
+type KernelRecord = Mutable<ModuleRecord> & { context?: ModuleContext }
 
 /**
  * Validate that a module's declared sdkVersion is compatible with the
@@ -331,13 +327,13 @@ export function createKernel(options: KernelOptions): Kernel {
   // Internal records use Mutable<ModuleRecord> so the kernel can update
   // state/error/context. list() exposes them as ReadonlyMap<string, ModuleRecord>
   // so callers get compile-time readonly semantics without a copy allocation.
-  const records = new Map<string, Mutable<ModuleRecord>>()
+  const records = new Map<string, KernelRecord>()
   const loadOrder: string[] = []  // ids in the order they finished loading
 
   // Active in-flight load/unload promises, keyed by module id.
   // Concurrent callers for the same id share a promise — avoids
   // double-load races and re-entrancy bugs.
-  const inFlightLoads = new Map<string, Promise<Mutable<ModuleRecord>>>()
+  const inFlightLoads = new Map<string, Promise<KernelRecord>>()
   const inFlightUnloads = new Map<string, Promise<void>>()
 
   // Shutdown flag — once set, new operations short-circuit.
@@ -371,7 +367,7 @@ export function createKernel(options: KernelOptions): Kernel {
         )
       }
 
-      records.set(id, { module, state: 'registered' } as Mutable<ModuleRecord>)
+      records.set(id, { module, state: 'registered' } as KernelRecord)
       log.debug(`registered module: ${id}`)
     },
 
@@ -416,7 +412,7 @@ export function createKernel(options: KernelOptions): Kernel {
       const existing = inFlightLoads.get(id)
       if (existing) return existing
 
-      const loadPromise = (async (): Promise<Mutable<ModuleRecord>> => {
+      const loadPromise = (async (): Promise<KernelRecord> => {
         // Validate deps exist before doing anything else.
         const deps = record.module.manifest.dependencies ?? []
         for (const dep of deps) {
