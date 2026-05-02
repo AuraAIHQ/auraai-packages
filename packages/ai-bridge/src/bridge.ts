@@ -12,7 +12,7 @@
 // M2 will add: streaming, model-capability matching, parallel "best of N",
 // cost-aware routing.
 
-import type { AIHandle } from '@auraaihq/sdk'
+import type { AIHandle, BridgeErrorCode } from '@auraaihq/sdk'
 import type {
   Adapter,
   AdapterErrorCode,
@@ -126,6 +126,12 @@ export interface BridgeOptions {
   /** Adapters available for routing. Order does not matter. */
   adapters: readonly Adapter[]
   /**
+   * Optional logger for bridge-level warnings (e.g., invalid usage
+   * discards). Defaults to console.warn. Inject in tests to suppress
+   * output and assert on warnings.
+   */
+  log?: { warn(message: string): void }
+  /**
    * id of the default primary adapter. Must match an entry in `adapters`.
    * If omitted, the first adapter in `adapters` is used.
    *
@@ -169,33 +175,9 @@ export interface Bridge extends AIHandle {
   getAdapter(id: string): Adapter | undefined
 }
 
-/**
- * Stable error codes for bridge-level (not adapter-level) failures.
- *
- * - `no_adapters`: createBridge given no adapters, or policy returned []
- * - `unknown_adapter`: primary/fallback id not in adapters, or policy
- *   returned an id not in adapters
- * - `duplicate_adapter`: two adapters share the same id
- * - `duplicate_in_order`: routing order contains the same id twice
- * - `invalid_adapter_metadata`: adapter metadata failed validation
- *   (bad id type, invalid maxConcurrency, conflicting maxConcurrency
- *   across bridges sharing the same adapter instance)
- * - `policy_error`: RoutingPolicy.pickOrder threw
- * - `policy_invalid_return`: pickOrder didn't return an array of strings
- * - `aggregate`: every adapter in the order failed (with recoverable
- *   errors); see `cause` for the chain of underlying AdapterErrors
- * - `unsupported_method`: feature not implemented yet
- */
-export type BridgeErrorCode =
-  | 'no_adapters'
-  | 'unknown_adapter'
-  | 'duplicate_adapter'
-  | 'duplicate_in_order'
-  | 'policy_error'
-  | 'policy_invalid_return'
-  | 'invalid_adapter_metadata'
-  | 'aggregate'
-  | 'unsupported_method'
+// BridgeErrorCode is the canonical type from @auraaihq/sdk.
+// Re-exported here for consumers who depend on ai-bridge directly.
+export type { BridgeErrorCode }
 
 /**
  * Errors thrown by the bridge itself (not by adapters).
@@ -277,6 +259,7 @@ function isNonNegativeInteger(n: unknown): n is number {
 function sanitizeUsage(
   usage: CompleteResult['usage'],
   adapterId: string,
+  warn: (msg: string) => void,
 ): CompleteResult['usage'] {
   if (usage === undefined) return undefined
   const { promptTokens, completionTokens } = usage
@@ -285,7 +268,7 @@ function sanitizeUsage(
   }
   // Adapter self-reported invalid usage — discard rather than propagate
   // garbage into cost tracking. This is a bug in the adapter; warn loudly.
-  console.warn(
+  warn(
     `[ai-bridge] adapter '${adapterId}' returned invalid usage ` +
       `(promptTokens=${promptTokens}, completionTokens=${completionTokens}); ` +
       'must be non-negative integers — discarding usage',
@@ -293,10 +276,17 @@ function sanitizeUsage(
   return undefined
 }
 
+/**
+ * **Test isolation note**: pass `semaphoreRegistry: new WeakMap()` in each
+ * test suite so per-adapter concurrency state does not leak across tests via
+ * the module-level global `ADAPTER_SEMAPHORES` WeakMap.
+ */
 export function createBridge(options: BridgeOptions): Bridge {
   if (options.adapters.length === 0) {
     throw new BridgeError('no_adapters', 'createBridge requires at least one adapter')
   }
+
+  const warn = options.log?.warn.bind(options.log) ?? ((msg: string) => console.warn(msg))
 
   // Use injected registry in tests to avoid cross-test state from the
   // module-level global WeakMap. Production callers leave it unset.
@@ -409,7 +399,7 @@ export function createBridge(options: BridgeOptions): Bridge {
     const entry = semaphores.get(adapter)
     if (!entry) {
       const result = await adapter.complete(prompt, options)
-      return { ...result, usage: sanitizeUsage(result.usage, adapter.metadata.id) }
+      return { ...result, usage: sanitizeUsage(result.usage, adapter.metadata.id, warn) }
     }
 
     let release: () => void
@@ -441,7 +431,7 @@ export function createBridge(options: BridgeOptions): Bridge {
       const result = await adapter.complete(prompt, options)
       return {
         ...result,
-        usage: sanitizeUsage(result.usage, adapter.metadata.id),
+        usage: sanitizeUsage(result.usage, adapter.metadata.id, warn),
       }
     } finally {
       release()
