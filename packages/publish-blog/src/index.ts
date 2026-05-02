@@ -39,13 +39,18 @@ async function handlePublish(
   payload: { title: string; markdown: string; endpoint: string },
   ctx: ModuleContext,
 ): Promise<Result<PublishData>> {
-  if (!payload.endpoint.startsWith('https://')) {
+  try {
+    const parsed = new URL(payload.endpoint)
+    if (parsed.protocol !== 'https:') {
+      return {
+        ok: false,
+        error: { code: 'invalid_endpoint', message: 'endpoint must use https://' },
+      }
+    }
+  } catch {
     return {
       ok: false,
-      error: {
-        code: 'invalid_endpoint',
-        message: 'endpoint must start with https://',
-      },
+      error: { code: 'invalid_endpoint', message: 'endpoint is not a valid URL' },
     }
   }
 
@@ -122,7 +127,8 @@ function handleLastUrl(ctx: ModuleContext): Result<LastUrlData> {
   return { ok: true, data: { url } }
 }
 
-// Minimal HTML escape — only what's needed inside <pre>
+// Escapes < > & only — safe for <pre> content but NOT for attribute values.
+// Do not reuse in attribute contexts without adding " and ' escaping.
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')

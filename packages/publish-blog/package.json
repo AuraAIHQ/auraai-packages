@@ -3,14 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "Capability module: publish markdown as a blog post via HTTP",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",
   "exports": { ".": "./src/index.ts" },
+  "engines": { "node": ">=22" },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "clean": "rm -rf dist .turbo"
   },
   "devDependencies": {
     "@auraaihq/sdk": "file:../sdk",
