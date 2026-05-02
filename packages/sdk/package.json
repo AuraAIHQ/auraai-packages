@@ -2,7 +2,7 @@
   "name": "@auraaihq/sdk",
   "version": "0.0.0",
   "description": "Public SDK for Agent24-Desktop module developers — types, helpers, lifecycle hooks",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",
   "exports": {

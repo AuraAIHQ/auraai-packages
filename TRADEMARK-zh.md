@@ -1,6 +1,6 @@
 # MushroomDAO 商标政策
 
-> 最后更新：2026-04-15
+> 最后更新：2026-04-28
 > 英文版（法律效力等同）：[TRADEMARK.md](TRADEMARK.md)
 
 ---

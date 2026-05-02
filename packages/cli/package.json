@@ -2,7 +2,7 @@
   "name": "@auraaihq/cli",
   "version": "0.0.0",
   "description": "CLI for scaffolding, debugging, and managing Agent24-Desktop modules",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",
   "bin": {

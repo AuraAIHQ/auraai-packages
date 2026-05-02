@@ -2,7 +2,7 @@
   "name": "@auraaihq/core",
   "version": "0.0.0",
   "description": "Agent24-Desktop kernel — module loader, IPC, AI Layer adapter framework",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.ts",
   "exports": {
