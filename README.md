@@ -1,31 +1,66 @@
 # auraai-packages
 
-Monorepo for [`@auraaihq/*`](https://www.npmjs.com/settings/auraaihq/packages) npm packages. Powers the [Agent24](https://github.com/AuraAIHQ/Agent24) and [Agent24-Desktop](https://github.com/AuraAIHQ/Agent24-Desktop) ecosystem.
+Monorepo for [`@auraaihq/*`](https://www.npmjs.com/settings/auraaihq/packages) npm packages. Powers the [Agent24-Desktop](https://github.com/AuraAIHQ/Agent24-Desktop) ecosystem.
 
-## Structure
+## 架构定位
 
 ```
-packages/      # 内核 + AI 适配 + memory + base modules（紧耦合）
-community/     # 社区模块 (cos72, myshop, mytask, myvote)
-publishers/    # 发布器模块 (publish-blog, publish-xiaohongshu, ...)
-scrapers/      # 抓取器模块 (scrape-web, scrape-rss, ...)
-idoris/        # iDoris 能力包装 (input, process, query, create)
+AuraAIHQ/Agent24-Desktop（Electron 框架壳）
+       │  npm file: (dev) / npm registry (prod)
+       ▼
+AuraAIHQ/auraai-packages（本仓库）
+       │
+       ├── packages/   内核层（框架直接依赖，随框架打包进 app）
+       │   ├── @auraaihq/core        模块加载 / 生命周期管理
+       │   ├── @auraaihq/sdk         模块开发 API
+       │   ├── @auraaihq/memory      L0 KV 存储（SQLite）
+       │   ├── @auraaihq/ai-bridge   AI 多适配器路由
+       │   └── @auraaihq/cli         命令行工具（独立，不进 app）
+       │
+       └── publishers/ scrapers/ community/ idoris/
+                      可插拔能力模块（按需引入）
+           ├── @auraaihq/publish-blog      博客发布（参考实现）
+           ├── @auraaihq/publish-xiaohongshu / publish-*
+           ├── @auraaihq/scrape-web / scrape-rss / scrape-*
+           ├── @auraaihq/module-identity / wallet / comm
+           └── @auraaihq/idoris-input / process / query / create
+```
+
+## packages/ 各包说明
+
+| 包 | 角色 | Desktop 依赖类型 | 职责 |
+|----|------|-----------------|------|
+| `@auraaihq/core` | 内核 | runtime，打包进 app | 模块注册/load/unload/invoke，生命周期状态机，依赖图排序 |
+| `@auraaihq/sdk` | 模块开发 API | devDependency（模块开发者） | `defineModule`、`ModuleManifest`、`MemoryHandle`、`AIHandle`、错误码类型 |
+| `@auraaihq/memory` | L0 记忆层 | runtime，打包进 app | SQLite KV 存储，命名空间隔离，`get/set/has/list/namespace/close` |
+| `@auraaihq/ai-bridge` | AI 路由层 | runtime，打包进 app | 多适配器统一接口，优先级 fallback，并发信号量，usage 校验 |
+| `@auraaihq/cli` | 命令行工具 | 独立，不进 app | 开发者脚手架，模块打包，发布辅助 |
+
+## 仓库目录结构
+
+```
+auraai-packages/
+├── packages/      内核 + SDK + 工具（紧耦合）
+├── community/     社区模块 (cos72, myshop, mytask, myvote)
+├── publishers/    发布器模块 (publish-blog, publish-xiaohongshu, ...)
+├── scrapers/      抓取器模块 (scrape-web, scrape-rss, ...)
+└── idoris/        iDoris 能力包装 (input, process, query, create)
 ```
 
 详见 [Agent24-Desktop/docs/PLAN.md](https://github.com/AuraAIHQ/Agent24-Desktop/blob/main/docs/PLAN.md) 和 [decision.md](https://github.com/AuraAIHQ/Agent24-Desktop/blob/main/docs/decision.md)。
 
 ## 命名规则
 
-| 前缀 | 含义 |
-|------|------|
-| 无前缀 | 内核 / SDK / 工具（`@auraaihq/core`, `@auraaihq/cli`） |
-| `ai-` | AI 模型适配器 |
-| `models-` | 模型 metadata（不含权重）|
-| `module-` | 基础模块 |
-| `publish-` | 发布器模块 |
-| `scrape-` | 抓取器模块 |
-| `idoris-` | iDoris 能力包装 |
-| `skills-` | Claude Code skill |
+| 前缀 | 含义 | 示例 |
+|------|------|------|
+| 无前缀 | 内核 / SDK / 工具 | `@auraaihq/core`, `@auraaihq/cli` |
+| `ai-` | AI 模型适配器 | `@auraaihq/ai-claude` |
+| `models-` | 模型 metadata（不含权重）| `@auraaihq/models-vision` |
+| `module-` | 基础能力模块 | `@auraaihq/module-identity` |
+| `publish-` | 发布器模块 | `@auraaihq/publish-blog` |
+| `scrape-` | 抓取器模块 | `@auraaihq/scrape-rss` |
+| `idoris-` | iDoris 能力包装 | `@auraaihq/idoris-query` |
+| `skills-` | Claude Code skill（M3+）| `@auraaihq/skills-evolve` |
 
 ## Development
 
@@ -42,49 +77,27 @@ pnpm clean             # 清理所有 dist/ 和缓存
 pnpm --filter @auraaihq/core build   # 单包构建
 ```
 
+**新增包必须**包含 `vitest.config.ts`，否则会被 root vitest 和 turbo 静默排除（见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
+
 **turbo 编排**：构建/typecheck 通过 [turbo](https://turborepo.com) 调度，自动增量缓存（重跑未变更的包瞬间完成）。配置见 `turbo.json`。
 
-**`pnpm test` vs `pnpm test:turbo` 选择**：
-- 日常开发：用 `pnpm test`（vitest projects 模式，单进程，启动最快、输出最清晰）
-- CI 跑测试：用 `pnpm test:turbo`（每包独立进程 + turbo 缓存，重复 PR 推送时未变更的包能直接命中缓存）
-
-二者使用同一份 vitest config（每包 `vitest.config.ts`），不存在 drift。
-
-**测试约定**：
-
-- 文件位置：`<group>/<pkg>/src/**/*.{test,spec}.?(c|m)[jt]s?(x)`（test 与 spec 都识别）
-- benchmarks：`<group>/<pkg>/src/**/*.{bench,benchmark}.?(c|m)[jt]s?(x)`，由 `pnpm bench` 触发
-- 配置：根 `vitest.config.ts` 管 coverage + projects；每包自己的 `vitest.config.ts` 决定 environment / include 等局部行为
-- Projects：根 vitest 跨 `packages/community/publishers/scrapers/idoris` 五个 group 自动发现各包的 `vitest.config.{ts,js,mjs}`
+**`pnpm test` vs `pnpm test:turbo`**：
+- 日常开发：`pnpm test`（vitest projects 模式，单进程，启动最快、输出最清晰）
+- CI：`pnpm test:turbo`（每包独立进程 + turbo 缓存，重复 PR 推送时未变更包直接命中缓存）
 
 ## Versioning & Publishing
 
 使用 [changesets](https://github.com/changesets/changesets) 管理版本与 CHANGELOG。**Independent versioning**——每包独立版本号。
 
 ```bash
-# 1. 改动代码后，添加一条 changeset
-pnpm changeset
-# 交互式选择影响哪些包 + bump 类型 (patch/minor/major) + 写描述
-
-# 2. 在 PR 中 commit `.changeset/*.md` 文件
-
-# 3. 合并到 main 后，跑 version 命令更新版本号 + CHANGELOG
-pnpm version
-
-# 4. 发布到 npm
-pnpm release
+pnpm changeset   # 描述改动，选择影响包和 bump 类型
+# commit .changeset/*.md 文件到 PR
+pnpm version     # 合并后更新版本号 + CHANGELOG
+pnpm release     # 发布到 npm
 ```
 
-`access: public` 已配置，但 M0 阶段所有包标记为 `"private": true`——避免在没有真正 build pipeline 之前误发 `.ts` 入口。M1 实现真正构建后再翻开 private 标志。
-
-> **⚠️ 翻开 private 前的 checklist**（手动或 CI 检查）：
-> - `dist/` 目录存在且包含 `index.js`
-> - `package.json` 的 `main` 指向 `dist/`，不是 `src/`
-> - `package.json` 的 `exports`（如有）也指向 `dist/`
-> - `package.json` 的 `files` 改为 `["dist", "README.md", "LICENSE"]` —— 不再发 `src/`（避免发布测试文件）
-> - `tsconfig.build.json` 跑过 `noEmitOnError: true` 校验
-> - `LICENSE` 文件存在（已加入各包）
+M0 阶段所有包标记为 `"private": true`，M1 构建完成后翻开。翻开前 checklist 见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## License
 
-MIT
+Apache-2.0
