@@ -12,10 +12,32 @@ env:
   TURBO_TELEMETRY_DISABLED: 1
 
 jobs:
+  typecheck-test:
+    name: Typecheck + Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa  # v4
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test:turbo
+
   release:
     name: Version + Publish (changesets)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: typecheck-test
     permissions:
       contents: write
       pull-requests: write

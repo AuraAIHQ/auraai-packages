@@ -80,10 +80,10 @@ jobs:
           for pkg_json in packages/*/package.json community/*/package.json publishers/*/package.json scrapers/*/package.json idoris/*/package.json; do
             [ -f "$pkg_json" ] || continue
             pkg_dir=$(dirname "$pkg_json")
-            is_private=$(node -p "require('./$pkg_json').private || false" 2>/dev/null || echo "false")
+            is_private=$(jq -r '.private // false' "$pkg_json")
             if [ "$is_private" = "false" ]; then
               # Public package: must have dist/index.js + main pointing to dist/
-              main=$(node -p "require('./$pkg_json').main || ''" 2>/dev/null)
+              main=$(jq -r '.main // ""' "$pkg_json")
               if [[ "$main" != dist/* ]]; then
                 echo "❌ $pkg_json: public package main='$main' must point to dist/"
                 exit 1
@@ -113,7 +113,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
         with:
-          fetch-depth: 2
+          fetch-depth: 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa  # v4
