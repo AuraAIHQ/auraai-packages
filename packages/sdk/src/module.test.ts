@@ -50,6 +50,7 @@ describe('@auraaihq/sdk module contract', () => {
       manifest: {
         id: 'x',
         version: '0.0.0',
+        sdkVersion: '^0.1.0',
         name: 'X',
         description: 'smoke test module',
         permissions: [],
@@ -71,22 +72,27 @@ describe('@auraaihq/sdk module contract', () => {
     }
 
     it('throws when id is missing', () => {
-      expect(() => defineModule({ ...base, manifest: { id: '', version: '0.0.0', name: 'X', description: 'x', permissions: [] } }))
+      expect(() => defineModule({ ...base, manifest: { id: '', version: '0.0.0', sdkVersion: '^0.1.0', name: 'X', description: 'x', permissions: [] } }))
         .toThrow(TypeError)
     })
 
     it('throws when version is missing', () => {
-      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '', name: 'X', description: 'x', permissions: [] } }))
+      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '', sdkVersion: '^0.1.0', name: 'X', description: 'x', permissions: [] } }))
         .toThrow(TypeError)
     })
 
     it('throws when name is missing', () => {
-      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '0.0.0', name: '', description: 'x', permissions: [] } }))
+      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '0.0.0', sdkVersion: '^0.1.0', name: '', description: 'x', permissions: [] } }))
         .toThrow(TypeError)
     })
 
     it('throws when description is missing', () => {
-      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '0.0.0', name: 'X', description: '', permissions: [] } }))
+      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '0.0.0', sdkVersion: '^0.1.0', name: 'X', description: '', permissions: [] } }))
+        .toThrow(TypeError)
+    })
+
+    it('throws when permissions is not an array', () => {
+      expect(() => defineModule({ ...base, manifest: { id: 'x', version: '0.0.0', sdkVersion: '^0.1.0', name: 'X', description: 'x', permissions: null as unknown as [] } }))
         .toThrow(TypeError)
     })
   })
@@ -160,6 +166,7 @@ describe('@auraaihq/sdk module contract', () => {
           manifest: {
             id: 'l',
             version: '0.0.0',
+            sdkVersion: '^0.1.0',
             name: 'l',
             description: 'lifecycle test',
             permissions: [],
@@ -175,12 +182,12 @@ describe('@auraaihq/sdk module contract', () => {
       }
     })
 
-    it('manifest fields are all optional except required ones', () => {
-      // Module with minimal required manifest still type-checks.
+    it('optional fields are undefined when not set', () => {
       const minimal = defineModule({
         manifest: {
           id: 'minimal',
           version: '0.0.1',
+          sdkVersion: '^0.1.0',
           name: 'Minimal',
           description: 'minimal module for testing optional fields',
           permissions: [],
@@ -193,7 +200,6 @@ describe('@auraaihq/sdk module contract', () => {
       })
       expect(minimal.manifest.intents).toBeUndefined()
       expect(minimal.manifest.lifecycle).toBeUndefined()
-      expect(minimal.manifest.sdkVersion).toBeUndefined()
       expect(minimal.manifest.dependencies).toBeUndefined()
     })
   })
@@ -211,6 +217,7 @@ describe('@auraaihq/sdk module contract', () => {
         manifest: {
           id: 'publish',
           version: '0.1.0',
+          sdkVersion: '^0.1.0',
           name: 'Publish',
           description: 'publishes markdown to a blog',
           permissions: [],

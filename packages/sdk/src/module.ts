@@ -65,12 +65,10 @@ export interface ModuleManifest {
    * The kernel rejects modules whose required range doesn't match
    * its own SDK version.
    *
-   * **Omitting this field disables all SDK compatibility checks.**
-   * Your module may silently break when the SDK evolves. This field
-   * will become required in a future minor release — omit only during
-   * early prototyping, never in published modules.
+   * Required from v0.1. Omitting is a compile error — always set this
+   * (e.g. `"^0.1.0"`) so the kernel can enforce SDK compatibility.
    */
-  sdkVersion?: string
+  sdkVersion: string
   /** Human-readable name shown in the UI. */
   name: string
   /** One-sentence description. */
@@ -232,9 +230,9 @@ export interface MemoryHandle {
   /**
    * List keys directly in this namespace, optionally filtered by prefix.
    * Sub-namespace keys are excluded; use `namespace('child').list()`.
-   * Future versions will add `limit` and `offset` for pagination.
+   * `cursor` is reserved for future pagination — pass `undefined` for now.
    */
-  list(prefix?: string): string[]
+  list(prefix?: string, cursor?: string): string[]
   /**
    * Derive a child handle scoped under the given sub-namespace. Use
    * this to isolate different logical domains within a single module
@@ -396,6 +394,9 @@ export function defineModule<
   }
   if (typeof manifest.description !== 'string' || !manifest.description) {
     throw new TypeError('defineModule: manifest.description must be a non-empty string')
+  }
+  if (!Array.isArray(manifest.permissions)) {
+    throw new TypeError('defineModule: manifest.permissions must be an array')
   }
   return module
 }
