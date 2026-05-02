@@ -244,9 +244,11 @@ function buildContext(
     ctx.memory = makeMemoryHandle(moduleMemory, manifest.permissions)
   }
 
-  // fs/net permissions are declared in the SDK but not yet enforced.
-  // Modules may still use Node.js APIs directly; this warning is the
-  // only guard until M2 adds sandbox/capability enforcement.
+  // In M1, unknown/unenforced permissions (fs:read, fs:write, net, and any
+  // future extension strings) are logged as warnings but NOT rejected.
+  // The SDK type comment says "Unknown permissions are rejected by the loader"
+  // as a forward declaration — actual enforcement is deferred to M2 when
+  // the sandbox/capability layer lands.
   const hasUnenforced = manifest.permissions.some(
     (p) => p === 'fs:read' || p === 'fs:write' || p === 'net',
   )
@@ -277,9 +279,11 @@ function isSdkVersionCompatible(moduleSdkVersion: string, kernelRange: string): 
   const stripped = moduleSdkVersion.replace(/^[\^~]/, '').trim()
   if (stripped.length === 0) return false
   const parts = stripped.split('.')
-  const major = parts[0]
-  const minor = parts[1]
-  if (major === undefined || minor === undefined) return false
+  // Require exactly 3 dot-separated all-numeric segments (X.Y.Z) to
+  // reject malformed strings like "0.1.evil-payload" or "0.1".
+  if (parts.length !== 3) return false
+  if (!parts.every((p) => /^\d+$/.test(p))) return false
+  const [major, minor] = parts
   return `${major}.${minor}` === kernelRange
 }
 
@@ -376,11 +380,9 @@ export function createKernel(options: KernelOptions): Kernel {
     },
 
     list() {
-      // Expose internal map as ReadonlyMap<string, ModuleRecord>. Callers
-      // get compile-time readonly fields without a per-call copy. The cast
-      // is sound because Mutable<ModuleRecord> satisfies ModuleRecord's
-      // readonly-field contract from the caller's perspective.
-      return records as unknown as ReadonlyMap<string, ModuleRecord>
+      // Return a shallow snapshot so callers cannot cast the internal
+      // mutable Map back and modify kernel state.
+      return new Map(records) as ReadonlyMap<string, ModuleRecord>
     },
 
     retry(id) {
@@ -553,6 +555,9 @@ export function createKernel(options: KernelOptions): Kernel {
     },
 
     async invoke(moduleId, intent) {
+      if (shuttingDown) {
+        throw new Error('kernel is shutting down; invoke rejected')
+      }
       const record = records.get(moduleId)
       if (!record) throw new UnknownModuleError(moduleId)
       if (record.state !== 'loaded') {
