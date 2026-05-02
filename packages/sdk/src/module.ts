@@ -145,6 +145,7 @@ export type BridgeErrorCode =
   | 'aggregate'
   | 'no_adapters'
   | 'unknown_adapter'
+  | 'duplicate_adapter'
   | 'duplicate_in_order'
   | 'policy_error'
   | 'policy_invalid_return'
