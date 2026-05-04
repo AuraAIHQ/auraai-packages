@@ -1,0 +1,3 @@
+[submodule "cbots"]
+	path = cbots
+	url = https://github.com/jhfnetboy/CBots

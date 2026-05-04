@@ -61,6 +61,30 @@ importers:
         specifier: ^4.1.5
         version: 4.1.5(@types/node@22.19.17)(@vitest/coverage-v8@4.1.5)(vite@8.0.10(@types/node@22.19.17))
 
+  publishers/publish-telegram:
+    devDependencies:
+      '@auraaihq/sdk':
+        specifier: file:../../packages/sdk
+        version: link:../../packages/sdk
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.5(@types/node@22.19.17)(@vitest/coverage-v8@4.1.5)(vite@8.0.10(@types/node@22.19.17))
+
+  publishers/publish-twitter:
+    devDependencies:
+      '@auraaihq/sdk':
+        specifier: file:../../packages/sdk
+        version: link:../../packages/sdk
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.5(@types/node@22.19.17)(@vitest/coverage-v8@4.1.5)(vite@8.0.10(@types/node@22.19.17))
+
 packages:
 
   '@babel/helper-string-parser@7.27.1':
