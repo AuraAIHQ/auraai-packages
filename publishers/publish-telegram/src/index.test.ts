@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import publishTelegramModule from './index'
+import publishTelegramModule, { type TelegramSendData } from './index'
 
 const noopLog = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 const ctx = { manifest: publishTelegramModule.manifest, log: noopLog }
@@ -43,7 +43,7 @@ describe('@auraaihq/publish-telegram', () => {
       )
       expect(result.ok).toBe(true)
       if (result.ok) {
-        expect(result.data.status).toBe('Message sent')
+        expect((result.data as TelegramSendData).status).toBe('Message sent')
       }
     })
 

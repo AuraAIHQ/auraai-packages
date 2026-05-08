@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import publishTwitterModule from './index'
+import publishTwitterModule, { type TweetData, type LastTweetUrlData } from './index'
 
 const noopLog = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 const ctx = { manifest: publishTwitterModule.manifest, log: noopLog }
@@ -39,8 +39,9 @@ describe('@auraaihq/publish-twitter', () => {
       )
       expect(result.ok).toBe(true)
       if (result.ok) {
-        expect(result.data.url).toBe('https://x.com/user/status/123')
-        expect(result.data.status).toBe('Tweet sent')
+        const data = result.data as TweetData
+        expect(data.url).toBe('https://x.com/user/status/123')
+        expect(data.status).toBe('Tweet sent')
       }
     })
 
@@ -111,7 +112,7 @@ describe('@auraaihq/publish-twitter', () => {
       ctx,
     )
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.data.url).toBeNull()
+    if (result.ok) expect((result.data as LastTweetUrlData).url).toBeNull()
   })
 
   it('returns unknown_intent for unrecognised kind', async () => {
