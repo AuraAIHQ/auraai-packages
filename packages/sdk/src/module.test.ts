@@ -5,6 +5,9 @@ import {
   type Intent,
   type Result,
   type ModuleLifecycle,
+  type ModuleType,
+  type ModuleNavItem,
+  type ContainerConfig,
   type AICompletionResult,
 } from './module'
 
@@ -278,6 +281,254 @@ describe('@auraaihq/sdk module contract', () => {
       expect(r1.ok && r1.data).toBe(1)
       expect(r2.ok && r2.data).toBe(2)
       await mod.unload()
+    })
+  })
+
+  // ── Agent24 manifest extension fields ───────────────────────────────────
+
+  describe('Agent24 manifest fields — happy path', () => {
+    const baseOps = {
+      async load() {},
+      async unload() {},
+      async invoke() { return { ok: true as const, data: null } },
+    }
+    const baseManifest = {
+      id: 'agent24-module',
+      version: '1.0.0',
+      sdkVersion: '^0.1.0',
+      name: 'Agent24 Module',
+      description: 'Module exercising Agent24 runtime fields',
+      permissions: [] as [],
+    }
+
+    it('accepts type: ui', () => {
+      const mod = defineModule({
+        ...baseOps,
+        manifest: { ...baseManifest, type: 'ui' as ModuleType },
+      })
+      expect(mod.manifest.type).toBe('ui')
+    })
+
+    it('accepts type: headless', () => {
+      const mod = defineModule({
+        ...baseOps,
+        manifest: { ...baseManifest, type: 'headless' as ModuleType },
+      })
+      expect(mod.manifest.type).toBe('headless')
+    })
+
+    it('accepts type: hybrid', () => {
+      const mod = defineModule({
+        ...baseOps,
+        manifest: { ...baseManifest, type: 'hybrid' as ModuleType },
+      })
+      expect(mod.manifest.type).toBe('hybrid')
+    })
+
+    it('accepts navItem with icon, label, route', () => {
+      const nav: ModuleNavItem = { icon: 'Pen', label: 'Publish', route: '/publish' }
+      const mod = defineModule({
+        ...baseOps,
+        manifest: { ...baseManifest, navItem: nav },
+      })
+      expect(mod.manifest.navItem).toEqual(nav)
+    })
+
+    it('accepts models as a string array', () => {
+      const models = ['claude-3-5-sonnet', 'gpt-4o']
+      const mod = defineModule({
+        ...baseOps,
+        manifest: { ...baseManifest, models },
+      })
+      expect(mod.manifest.models).toEqual(models)
+    })
+
+    it('accepts empty models array', () => {
+      const mod = defineModule({
+        ...baseOps,
+        manifest: { ...baseManifest, models: [] },
+      })
+      expect(mod.manifest.models).toEqual([])
+    })
+
+    it('accepts container config with all fields', () => {
+      const container: ContainerConfig = {
+        image: 'ghcr.io/example/my-module:1.0.0',
+        port: 8080,
+        startCmd: ['node', 'server.js'],
+        healthPath: '/health',
+        memoryMib: 256,
+      }
+      const mod = defineModule({
+        ...baseOps,
+        manifest: { ...baseManifest, container },
+      })
+      expect(mod.manifest.container).toEqual(container)
+    })
+
+    it('accepts container config with required fields only', () => {
+      const mod = defineModule({
+        ...baseOps,
+        manifest: {
+          ...baseManifest,
+          container: { image: 'my-image:latest', port: 3000 },
+        },
+      })
+      expect(mod.manifest.container?.image).toBe('my-image:latest')
+      expect(mod.manifest.container?.port).toBe(3000)
+      expect(mod.manifest.container?.startCmd).toBeUndefined()
+    })
+
+    it('accepts all Agent24 fields together', () => {
+      const mod = defineModule({
+        ...baseOps,
+        manifest: {
+          ...baseManifest,
+          type: 'ui' as ModuleType,
+          navItem: { icon: 'Star', label: 'My Module', route: '/my' },
+          models: ['claude-3-haiku'],
+          container: { image: 'example:v1', port: 9000 },
+        },
+      })
+      expect(mod.manifest.type).toBe('ui')
+      expect(mod.manifest.navItem?.route).toBe('/my')
+      expect(mod.manifest.models).toEqual(['claude-3-haiku'])
+      expect(mod.manifest.container?.port).toBe(9000)
+    })
+
+    it('new Agent24 fields are undefined when not set (backward compatible)', () => {
+      const mod = defineModule({
+        ...baseOps,
+        manifest: baseManifest,
+      })
+      expect(mod.manifest.type).toBeUndefined()
+      expect(mod.manifest.navItem).toBeUndefined()
+      expect(mod.manifest.models).toBeUndefined()
+      expect(mod.manifest.container).toBeUndefined()
+    })
+  })
+
+  describe('Agent24 manifest fields — defineModule validation errors', () => {
+    const baseOps = {
+      async load() {},
+      async unload() {},
+      async invoke() { return { ok: true as const, data: null } },
+    }
+    const baseManifest = {
+      id: 'x',
+      version: '0.0.0',
+      sdkVersion: '^0.1.0',
+      name: 'X',
+      description: 'x',
+      permissions: [] as [],
+    }
+
+    it('throws TypeError for invalid type value', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            type: 'floating-window' as ModuleType,
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for empty string type value', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            type: '' as ModuleType,
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.image empty string', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: '', port: 8080 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.port zero', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: 'valid:latest', port: 0 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.port 65536 (out of range)', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: 'valid:latest', port: 65536 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.port negative', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: 'valid:latest', port: -1 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.port non-integer float', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: 'valid:latest', port: 8080.5 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for models containing non-string element', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            models: ['valid-model', 42] as unknown as string[],
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for models being a non-array value', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            models: 'single-model-not-array' as unknown as string[],
+          },
+        }),
+      ).toThrow(TypeError)
     })
   })
 })
