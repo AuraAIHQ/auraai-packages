@@ -27,8 +27,24 @@ export interface MemoryOptions {
 }
 
 export interface Memory {
-  /** Read a value. Returns null when the key is absent. */
-  get<T = unknown>(key: string): T | null
+  /**
+   * Read a value. Returns null when the key is absent.
+   *
+   * **Type safety**: the generic `T` is a compile-time convenience only —
+   * there is no runtime check that the stored value matches `T`. If you
+   * need runtime validation, pass an optional `validator` function; when
+   * provided it receives the raw parsed value and must return `true` if
+   * the value conforms to `T`, otherwise `get` returns `null` and logs
+   * a warning. M2 will formalise this with a structured schema option.
+   *
+   * @example
+   * // No validation (legacy / trusted data):
+   * const x = mem.get<number>('count')
+   *
+   * // With inline validator:
+   * const n = mem.get<number>('count', (v) => typeof v === 'number')
+   */
+  get<T = unknown>(key: string, validator?: (value: unknown) => value is T): T | null
   /** Write a value. Overwrites any existing entry for the same key. */
   set(key: string, value: unknown): void
   /** Remove a key. No-op if the key is absent. */
@@ -39,12 +55,17 @@ export interface Memory {
    */
   has(key: string): boolean
   /**
-   * List keys in this namespace. If `prefix` is provided, returns only
-   * keys starting with `prefix` (the prefix itself is matched against
-   * the key portion, not the namespaced storage row).
+   * List keys directly in this namespace. If `prefix` is provided,
+   * returns only keys starting with `prefix` (matched against the
+   * key portion, not the underlying storage row).
    *
-   * If `prefix` is omitted or empty, returns all keys in the current
-   * namespace.
+   * If `prefix` is omitted or empty, returns all direct keys in the
+   * current namespace. Sub-namespace keys (those stored under a child
+   * created via `namespace()`) are excluded — use
+   * `namespace('child').list()` to inspect a child namespace's keys.
+   *
+   * All returned keys are safe to pass to `get()`, `set()`, and
+   * `delete()` on this same Memory instance.
    */
   list(prefix?: string): string[]
   /**
@@ -153,13 +174,14 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
   }
 
   const memory: Memory = {
-    get<T = unknown>(key: string): T | null {
+    get<T = unknown>(key: string, validator?: (value: unknown) => value is T): T | null {
       assertDbOpen()
       validateKey(key)
       const row = getStmt.get(fullKey(key))
       if (!row) return null
+      let parsed: unknown
       try {
-        return JSON.parse(row.value) as T
+        parsed = JSON.parse(row.value)
       } catch (error) {
         throw new MemoryCorruptionError(
           key,
@@ -167,6 +189,13 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
           error,
         )
       }
+      if (validator !== undefined) {
+        if (!validator(parsed)) {
+          console.warn(`[memory] get('${key}'): stored value failed validator — returning null`)
+          return null
+        }
+      }
+      return parsed as T
     },
 
     has(key: string): boolean {
@@ -193,8 +222,13 @@ function makeMemory(db: SqliteDb, namespace: string, owned: boolean): Memory {
       const userPrefix = prefix ?? ''
       const pattern = `${escapeLike(decodePrefix)}${escapeLike(userPrefix)}%`
       const rows = listStmt.all(pattern)
-      // Strip the namespace prefix to return user-facing keys
-      return rows.map((row) => row.ns_key.slice(decodePrefix.length))
+      // Strip the namespace prefix and exclude sub-namespace keys (those
+      // still containing ':' after stripping). Only direct keys of this
+      // namespace are returned; use namespace('child').list() to inspect
+      // a child namespace.
+      return rows
+        .map((row) => row.ns_key.slice(decodePrefix.length))
+        .filter((key) => !key.includes(NAMESPACE_SEPARATOR))
     },
 
     namespace(child: string): Memory {
@@ -266,7 +300,7 @@ function serializeValue(value: unknown): string {
  * const sub = mem.namespace('module-x')
  * sub.set('private', 'value')
  * sub.list()                       // ['private']
- * mem.list()                       // ['foo', 'module-x:private']
+ * mem.list()                       // ['foo']  — sub-namespace keys are excluded
  * mem.close()
  *
  * @remarks

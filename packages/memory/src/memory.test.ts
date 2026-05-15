@@ -1,5 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import Database from 'better-sqlite3'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { createMemory, MemoryCorruptionError, type Memory } from './memory'
+
+/**
+ * Run `fn` with a fresh temporary SQLite file. Cleans up the file and
+ * its WAL/SHM companions after `fn` returns (or throws).
+ */
+async function withTmpDb<T>(
+  label: string,
+  fn: (tmpFile: string) => T | Promise<T>,
+): Promise<T> {
+  const tmpFile = path.join(
+    os.tmpdir(),
+    `memory-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+  )
+  try {
+    return await fn(tmpFile)
+  } finally {
+    for (const suffix of ['', '-shm', '-wal']) {
+      try { fs.unlinkSync(tmpFile + suffix) } catch { /* ignore */ }
+    }
+  }
+}
 
 describe('@auraaihq/memory L0', () => {
   let mem: Memory
@@ -184,15 +209,22 @@ describe('@auraaihq/memory L0', () => {
       expect(sub2.get('inner')).toBe('x')
     })
 
-    it('list() in root still sees the namespaced storage rows', () => {
+    it('list() in root excludes child namespace keys', () => {
       const sub = mem.namespace('sub')
       sub.set('x', 1)
       mem.set('y', 2)
-      // Root's list() returns the underlying storage keys (which DO
-      // contain ':' — those came from the namespaced storage layout,
-      // not from user input). Listing is read-only so the separator
-      // restriction doesn't apply here.
-      expect(mem.list().sort()).toEqual(['sub:x', 'y'])
+      // Only direct keys of the root namespace are returned.
+      // 'sub:x' lives in the 'sub' child namespace and is excluded.
+      // Use mem.namespace('sub').list() to inspect child keys.
+      expect(mem.list().sort()).toEqual(['y'])
+    })
+
+    it('list() in child namespace only returns that namespace\'s direct keys', () => {
+      const sub = mem.namespace('sub')
+      sub.set('x', 1)
+      sub.set('y', 2)
+      mem.set('root-key', 0)
+      expect(sub.list().sort()).toEqual(['x', 'y'])
     })
 
     it('nested namespaces compose with separator', () => {
@@ -279,18 +311,8 @@ describe('@auraaihq/memory L0', () => {
   })
 
   describe('corruption handling', () => {
-    it('throws MemoryCorruptionError when stored JSON is malformed', () => {
-      // Use a temp file so we can corrupt it via a second connection
-      // and verify createMemory's read path classifies the failure.
-      const Database = require('better-sqlite3') as typeof import('better-sqlite3')
-      const fs = require('node:fs') as typeof import('node:fs')
-      const os = require('node:os') as typeof import('node:os')
-      const path = require('node:path') as typeof import('node:path')
-      const tmpFile = path.join(
-        os.tmpdir(),
-        `memory-corrupt-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-      )
-      try {
+    it('throws MemoryCorruptionError when stored JSON is malformed', () =>
+      withTmpDb('corrupt-test', (tmpFile) => {
         // Step 1: create with our helper, write a value.
         const m1 = createMemory({ filename: tmpFile })
         m1.set('broken', 'normal-value')
@@ -311,27 +333,10 @@ describe('@auraaihq/memory L0', () => {
         } finally {
           m2.close()
         }
-      } finally {
-        try {
-          fs.unlinkSync(tmpFile)
-          fs.unlinkSync(`${tmpFile}-shm`)
-          fs.unlinkSync(`${tmpFile}-wal`)
-        } catch {
-          // ignore — WAL files may not exist
-        }
-      }
-    })
+      }))
 
-    it('MemoryCorruptionError preserves the original parse error as cause', () => {
-      const Database = require('better-sqlite3') as typeof import('better-sqlite3')
-      const fs = require('node:fs') as typeof import('node:fs')
-      const os = require('node:os') as typeof import('node:os')
-      const path = require('node:path') as typeof import('node:path')
-      const tmpFile = path.join(
-        os.tmpdir(),
-        `memory-corrupt-cause-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-      )
-      try {
+    it('MemoryCorruptionError preserves the original parse error as cause', () =>
+      withTmpDb('corrupt-cause', (tmpFile) => {
         const m1 = createMemory({ filename: tmpFile })
         m1.set('k', 1)
         m1.close()
@@ -345,56 +350,25 @@ describe('@auraaihq/memory L0', () => {
         const m2 = createMemory({ filename: tmpFile })
         try {
           let caught: unknown
-          try {
-            m2.get('k')
-          } catch (e) {
-            caught = e
-          }
+          try { m2.get('k') } catch (e) { caught = e }
           expect(caught).toBeInstanceOf(MemoryCorruptionError)
           expect((caught as MemoryCorruptionError).key).toBe('k')
           expect((caught as MemoryCorruptionError).cause).toBeInstanceOf(Error)
         } finally {
           m2.close()
         }
-      } finally {
-        try {
-          fs.unlinkSync(tmpFile)
-          fs.unlinkSync(`${tmpFile}-shm`)
-          fs.unlinkSync(`${tmpFile}-wal`)
-        } catch {
-          // ignore
-        }
-      }
-    })
+      }))
   })
 
   describe('busy_timeout pragma', () => {
-    it('is set on file-backed databases', () => {
-      const Database = require('better-sqlite3') as typeof import('better-sqlite3')
-      const fs = require('node:fs') as typeof import('node:fs')
-      const os = require('node:os') as typeof import('node:os')
-      const path = require('node:path') as typeof import('node:path')
-      const tmpFile = path.join(
-        os.tmpdir(),
-        `memory-busy-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-      )
-      try {
+    it('is set on file-backed databases', () =>
+      withTmpDb('busy-test', (tmpFile) => {
         const m = createMemory({ filename: tmpFile })
-        // Verify pragma via a separate read connection
         const probe = new Database(tmpFile)
         const result = probe.pragma('busy_timeout', { simple: true })
         expect(result).toBe(5000)
         probe.close()
         m.close()
-      } finally {
-        try {
-          fs.unlinkSync(tmpFile)
-          fs.unlinkSync(`${tmpFile}-shm`)
-          fs.unlinkSync(`${tmpFile}-wal`)
-        } catch {
-          // ignore
-        }
-      }
-    })
+      }))
   })
 })
