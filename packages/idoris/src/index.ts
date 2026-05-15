@@ -1,4 +1,4 @@
-// @auraaihq/ai-bridge — AI Layer router for Agent24-Desktop kernel.
+// @auraaihq/idoris — AI gateway for Agent24-Desktop kernel.
 //
 // Concrete provider adapters (idoris / claude / openai / local) ship
 // as separate packages (@auraaihq/ai-* — landing in M1+). This package

@@ -1,8 +1,8 @@
 {
-  "name": "@auraaihq/ai-bridge",
+  "name": "@auraaihq/idoris",
   "version": "0.0.0",
   "private": true,
-  "description": "AI Layer router for Agent24 — selects between adapters (idoris/claude/openai/local) based on policy + falls back on failure",
+  "description": "AI gateway — adapter routing, local/remote dispatch, privacy layer (iDoris)",
   "license": "MIT",
   "type": "module",
   "main": "src/index.ts",

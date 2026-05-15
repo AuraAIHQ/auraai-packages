@@ -3,7 +3,7 @@ import { createBridge, BridgeError, type SemaphoreEntry } from './bridge'
 import { createInProcessAdapter } from './in-process-adapter'
 import { AdapterError, isAdapterError, type AdapterErrorCode, type Adapter } from './adapter'
 
-describe('@auraaihq/ai-bridge', () => {
+describe('@auraaihq/idoris', () => {
   describe('createBridge', () => {
     it('rejects empty adapter list', () => {
       const err = (() => {
@@ -1008,7 +1008,7 @@ describe('@auraaihq/ai-bridge', () => {
   })
 })
 
-describe('@auraaihq/ai-bridge isAdapterError', () => {
+describe('@auraaihq/idoris isAdapterError', () => {
   it('matches actual AdapterError instances', () => {
     expect(isAdapterError(new AdapterError('rate_limit', 'msg'))).toBe(true)
   })
@@ -1061,7 +1061,7 @@ describe('@auraaihq/ai-bridge isAdapterError', () => {
   })
 })
 
-describe('@auraaihq/ai-bridge sanitization', () => {
+describe('@auraaihq/idoris sanitization', () => {
   it('error messages with adversarial content stay bounded and printable', async () => {
     const massive = '\n'.repeat(50000) + 'x'.repeat(50000)
     const bridge = createBridge({
@@ -1114,7 +1114,7 @@ describe('@auraaihq/ai-bridge sanitization', () => {
   })
 })
 
-describe('@auraaihq/ai-bridge in-process adapter', () => {
+describe('@auraaihq/idoris in-process adapter', () => {
   it('returns text from `text` option', async () => {
     const a = createInProcessAdapter({ text: 'hello' })
     const result = await a.complete('prompt')

@@ -87,7 +87,7 @@ export interface KernelOptions {
   log?: KernelLogger
   /**
    * AI handle the kernel will hand to modules with the `'ai'`
-   * permission. M2 will replace this with the real ai-bridge router.
+   * permission. M2 will replace this with the real idoris router.
    */
   ai?: AIHandle
   /** Lifecycle event hooks. */
@@ -216,7 +216,8 @@ function makeMemoryHandle(memory: Memory, permissions: readonly Permission[]): M
     has: (key) => memory.has(key),
     set: write ? (key, value) => memory.set(key, value) : () => denyWrite('set'),
     delete: write ? (key) => memory.delete(key) : () => denyWrite('delete'),
-    list: (prefix) => memory.list(prefix),
+    list: (prefix, _cursor) => memory.list(prefix),
+    namespace: (child) => makeMemoryHandle(memory.namespace(child), permissions),
   }
 }
 

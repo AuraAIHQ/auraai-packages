@@ -121,9 +121,9 @@ export interface AICompletionResult {
 }
 
 /**
- * Stable error codes that `AdapterError` (from `@auraaihq/ai-bridge`) may
+ * Stable error codes that `AdapterError` (from `@auraaihq/idoris`) may
  * carry. Defined here so SDK consumers can reference them without a direct
- * `ai-bridge` dependency; `ai-bridge` MUST use these exact strings.
+ * `idoris` dependency; `idoris` MUST use these exact strings.
  */
 export type AdapterErrorCode =
   | 'auth'
@@ -136,9 +136,9 @@ export type AdapterErrorCode =
   | 'unknown'
 
 /**
- * Stable error codes that `BridgeError` (from `@auraaihq/ai-bridge`) may
+ * Stable error codes that `BridgeError` (from `@auraaihq/idoris`) may
  * carry for routing-level failures. Defined here so SDK consumers can
- * reference them without a direct `ai-bridge` dependency; `ai-bridge`
+ * reference them without a direct `idoris` dependency; `idoris`
  * MUST use these exact strings.
  */
 export type BridgeErrorCode =
@@ -154,7 +154,7 @@ export type BridgeErrorCode =
 
 /**
  * AI invocation handle. M1 contract — concrete behaviour provided by
- * @auraaihq/ai-bridge. M2 will add streaming + tool use.
+ * @auraaihq/idoris. M2 will add streaming + tool use.
  */
 export interface AIHandle {
   /**
@@ -162,10 +162,10 @@ export interface AIHandle {
    * concern. Returns the assistant's text on success.
    *
    * On failure, throws either:
-   * - `AdapterError` (from `@auraaihq/ai-bridge`) with a `code` of
+   * - `AdapterError` (from `@auraaihq/idoris`) with a `code` of
    *   type {@link AdapterErrorCode} — adapter-level failure that wasn't
    *   recoverable by trying another adapter.
-   * - `BridgeError` (from `@auraaihq/ai-bridge`) with a `code` of
+   * - `BridgeError` (from `@auraaihq/idoris`) with a `code` of
    *   type {@link BridgeErrorCode} — routing-level failure (no adapters,
    *   all adapters failed, policy error, etc.).
    *

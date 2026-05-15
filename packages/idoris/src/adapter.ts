@@ -127,7 +127,7 @@ export class AdapterError extends Error {
 
 /**
  * Structural type guard for AdapterError that survives realm/duplicate-
- * package boundaries (workers, multiple installs of @auraaihq/ai-bridge,
+ * package boundaries (workers, multiple installs of @auraaihq/idoris,
  * bundling pitfalls). Prefer this over `instanceof AdapterError` in the
  * bridge — `instanceof` returns false when the AdapterError comes from
  * a different copy of this module.

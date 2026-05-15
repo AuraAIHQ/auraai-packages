@@ -176,7 +176,7 @@ export interface Bridge extends AIHandle {
 }
 
 // BridgeErrorCode is the canonical type from @auraaihq/sdk.
-// Re-exported here for consumers who depend on ai-bridge directly.
+// Re-exported here for consumers who depend on idoris directly.
 export type { BridgeErrorCode }
 
 /**
@@ -269,7 +269,7 @@ function sanitizeUsage(
   // Adapter self-reported invalid usage — discard rather than propagate
   // garbage into cost tracking. This is a bug in the adapter; warn loudly.
   warn(
-    `[ai-bridge] adapter '${adapterId}' returned invalid usage ` +
+    `[idoris] adapter '${adapterId}' returned invalid usage ` +
       `(promptTokens=${promptTokens}, completionTokens=${completionTokens}); ` +
       'must be non-negative integers — discarding usage',
   )
