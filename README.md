@@ -49,6 +49,25 @@ auraai-packages/
 
 详见 [Agent24-Desktop/docs/PLAN.md](https://github.com/AuraAIHQ/Agent24-Desktop/blob/main/docs/PLAN.md) 和 [decision.md](https://github.com/AuraAIHQ/Agent24-Desktop/blob/main/docs/decision.md)。
 
+## packages/ 各包说明
+
+`packages/` 下的 5 个包构成 Agent24 生态的核心运行时与开发工具链。它们与 Agent24-Desktop 的关系如下：
+
+| 包 | 角色 | Desktop 依赖方式 | 服务对象 |
+|---|---|---|---|
+| `@auraaihq/core` | Desktop 内核 | **运行时依赖，打包进 app** | Desktop 自身 — 负责 capability module 的加载、生命周期管理、IPC 注册 |
+| `@auraaihq/memory` | 持久化内存层 | **运行时依赖，打包进 app** | Desktop 内各 capability module 读写 SQLite 本地状态（L0-L3 分层，M1 交付 L0） |
+| `@auraaihq/ai-bridge` | AI 请求路由 | **运行时依赖，打包进 app** | Desktop 内 AI 调用的统一入口 — 按策略选择 iDoris / Claude / OpenAI / 本地模型并自动降级 |
+| `@auraaihq/sdk` | 模块开发 API | **开发时依赖（不进 app bundle）** | 第三方 / 社区模块开发者 — 提供 `defineModule`、`ModuleContext`、`MemoryHandle` 等类型与生命周期接口 |
+| `@auraaihq/cli` | 开发者工具链 | **不依赖（独立 CLI 工具）** | 模块开发者的本地工作流 — 脚手架、调试、打包、发布 capability module |
+
+**关键区分**：
+- `core` / `memory` / `ai-bridge` 是 Desktop **运行时**的组成部分，最终打包进 Electron app。
+- `sdk` 是 Desktop **插件生态**的公共 API，Desktop 是宿主，`sdk` 服务的是在 Desktop 上开发插件的人。
+- `cli` 是独立的开发者工具，不进 app，用于模块的创建、调试和发布流程。
+
+目前（M1 阶段）Agent24-Desktop 尚未在 `package.json` 中引入任何 `@auraaihq/*` 依赖——集成在 M1+ 里程碑中完成。
+
 ## 命名规则
 
 | 前缀 | 含义 | 示例 |
