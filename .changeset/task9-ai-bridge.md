@@ -1,9 +1,9 @@
 ---
-"@auraaihq/ai-bridge": patch
+"@auraaihq/idoris": patch
 "@auraaihq/sdk": patch
 ---
 
-Add AI Layer router (`@auraaihq/ai-bridge`):
+Add AI gateway (`@auraaihq/idoris`, renamed from ai-bridge):
 
 - `Adapter` contract: `metadata` (id/name/provider/local) + `complete(prompt, options)` returning `CompleteResult`
 - `AdapterError` with classified codes (`rate_limit`, `timeout`, `network`, `auth`, `invalid_request`, `context_overflow`, `unsupported`, `aborted`, `unknown`)

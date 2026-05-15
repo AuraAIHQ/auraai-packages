@@ -1,5 +1,5 @@
 ---
-"@auraaihq/ai-bridge": patch
+"@auraaihq/idoris": patch
 ---
 
 Review fixes for AI bridge:
