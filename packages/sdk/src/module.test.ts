@@ -530,5 +530,101 @@ describe('@auraaihq/sdk module contract', () => {
         }),
       ).toThrow(TypeError)
     })
+
+    it('throws TypeError for models containing an empty string', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            models: ['valid-model', ''],
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for navItem.icon being empty string', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            navItem: { icon: '', label: 'Publish', route: '/publish' },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for navItem.label being empty string', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            navItem: { icon: 'Star', label: '', route: '/publish' },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for navItem.route not starting with /', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            navItem: { icon: 'Star', label: 'Publish', route: 'publish' },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for navItem.route being empty string', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            navItem: { icon: 'Star', label: 'Publish', route: '' },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.memoryMib being zero', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: 'valid:latest', port: 8080, memoryMib: 0 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.memoryMib being negative', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: 'valid:latest', port: 8080, memoryMib: -512 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
+
+    it('throws TypeError for container.memoryMib being a float', () => {
+      expect(() =>
+        defineModule({
+          ...baseOps,
+          manifest: {
+            ...baseManifest,
+            container: { image: 'valid:latest', port: 8080, memoryMib: 512.5 },
+          },
+        }),
+      ).toThrow(TypeError)
+    })
   })
 })

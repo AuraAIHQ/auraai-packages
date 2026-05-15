@@ -40,6 +40,9 @@ export type Permission =
  */
 export type ModuleLifecycle = 'persistent' | 'on-demand' | 'ephemeral'
 
+/** Allowed values for {@link ModuleManifest.type}. */
+const VALID_MODULE_TYPES = ['ui', 'headless', 'hybrid'] as const
+
 /**
  * Agent24 module rendering type. Describes how the module is presented
  * in the Agent24 UI.
@@ -475,11 +478,23 @@ export function defineModule<
   // ── Validate Agent24 optional fields when present ──────────────────────
 
   if (manifest.type !== undefined) {
-    const validTypes: ModuleType[] = ['ui', 'headless', 'hybrid']
-    if (!validTypes.includes(manifest.type)) {
+    if (!(VALID_MODULE_TYPES as readonly string[]).includes(manifest.type)) {
       throw new TypeError(
-        `defineModule: manifest.type must be one of ${validTypes.map((t) => `'${t}'`).join(', ')} — got '${manifest.type}'`,
+        `defineModule: manifest.type must be one of ${VALID_MODULE_TYPES.map((t) => `'${t}'`).join(', ')} — got '${manifest.type}'`,
       )
+    }
+  }
+
+  if (manifest.navItem !== undefined) {
+    const { navItem } = manifest
+    if (typeof navItem.icon !== 'string' || !navItem.icon) {
+      throw new TypeError('defineModule: manifest.navItem.icon must be a non-empty string')
+    }
+    if (typeof navItem.label !== 'string' || !navItem.label) {
+      throw new TypeError('defineModule: manifest.navItem.label must be a non-empty string')
+    }
+    if (typeof navItem.route !== 'string' || !navItem.route.startsWith('/')) {
+      throw new TypeError("defineModule: manifest.navItem.route must be a string starting with '/'")
     }
   }
 
@@ -498,14 +513,24 @@ export function defineModule<
         'defineModule: manifest.container.port must be an integer in range 1–65535',
       )
     }
+    if (
+      container.memoryMib !== undefined &&
+      (!Number.isInteger(container.memoryMib) || container.memoryMib <= 0)
+    ) {
+      throw new TypeError(
+        'defineModule: manifest.container.memoryMib must be a positive integer',
+      )
+    }
   }
 
   if (manifest.models !== undefined) {
     if (
       !Array.isArray(manifest.models) ||
-      manifest.models.some((m) => typeof m !== 'string')
+      manifest.models.some((m) => typeof m !== 'string' || !m)
     ) {
-      throw new TypeError('defineModule: manifest.models must be an array of strings')
+      throw new TypeError(
+        'defineModule: manifest.models must be an array of non-empty strings',
+      )
     }
   }
 
