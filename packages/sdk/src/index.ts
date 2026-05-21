@@ -21,5 +21,7 @@ export {
   type AIHandle,
   type AICompletionResult,
   type MemoryHandle,
+  type AdapterErrorCode,
+  type BridgeErrorCode,
   defineModule,
 } from './module'

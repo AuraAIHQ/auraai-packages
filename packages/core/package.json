@@ -19,11 +19,18 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "echo 'build TBD (M1) — when implemented, use: tsc -p tsconfig.build.json'",
+    "build": "echo 'build TBD (M1 next iteration) — when implemented, use: tsc -p tsconfig.build.json'",
     "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
+  "peerDependencies": {
+    "@auraaihq/memory": "workspace:*",
+    "@auraaihq/sdk": "workspace:*"
+  },
   "devDependencies": {
+    "@auraaihq/memory": "workspace:*",
+    "@auraaihq/sdk": "workspace:*",
+    "@types/node": "^22.0.0",
     "vitest": "^4.1.5"
   },
   "publishConfig": {
