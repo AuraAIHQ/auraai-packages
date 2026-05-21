@@ -40,6 +40,55 @@ export type Permission =
  */
 export type ModuleLifecycle = 'persistent' | 'on-demand' | 'ephemeral'
 
+/** Allowed values for {@link ModuleManifest.type}. */
+const VALID_MODULE_TYPES = ['ui', 'headless', 'hybrid'] as const
+
+/**
+ * Agent24 module rendering type. Describes how the module is presented
+ * in the Agent24 UI.
+ *
+ * - `ui`: module has a dedicated UI panel.
+ * - `headless`: background service with no visual component.
+ * - `hybrid`: has both UI and headless modes.
+ *
+ * Optional in SDK context (required by Agent24 framework at runtime).
+ */
+export type ModuleType = 'ui' | 'headless' | 'hybrid'
+
+/**
+ * Navigation item for Agent24's sidebar. Used when `type` is `'ui'` or
+ * `'hybrid'` so the kernel can register an icon + label + route.
+ */
+export interface ModuleNavItem {
+  /** Icon identifier (e.g. a Lucide icon name or an emoji). */
+  icon: string
+  /** Human-readable label shown in the sidebar. */
+  label: string
+  /** Client-side route path (e.g. "/modules/publish-blog"). */
+  route: string
+}
+
+/**
+ * OCI container configuration for Agent24's BoxLite runtime (M4).
+ * Describes how to pull and start the module's container process.
+ *
+ * Validated by `defineModule` when present:
+ * - `image` must be a non-empty string
+ * - `port` must be an integer in the range 1–65535
+ */
+export interface ContainerConfig {
+  /** OCI image reference (e.g. "ghcr.io/example/my-module:1.0.0"). */
+  image: string
+  /** Port the container listens on. Must be 1–65535. */
+  port: number
+  /** Override the container entrypoint command. */
+  startCmd?: string[]
+  /** HTTP path the kernel polls to determine readiness (e.g. "/health"). */
+  healthPath?: string
+  /** Memory limit in mebibytes. Kernel enforces a hard cap when set. */
+  memoryMib?: number
+}
+
 /**
  * Static metadata describing the module. Loaded before `load()` so
  * the kernel can verify version/dependencies/permissions and request
@@ -94,6 +143,32 @@ export interface ModuleManifest {
   dependencies?: readonly string[]
   /** Module lifecycle hint (default: `on-demand`). */
   lifecycle?: ModuleLifecycle
+
+  // ── Agent24 framework fields (optional — preserves backward compatibility
+  //    with non-Agent24 SDK consumers) ──────────────────────────────────────
+
+  /**
+   * Agent24 rendering type. Required by Agent24 at runtime but optional
+   * here so non-Agent24 consumers can use `ModuleManifest` without it.
+   * `defineModule` validates against the allowed union when present.
+   */
+  type?: ModuleType
+  /**
+   * Sidebar navigation item. Relevant when `type` is `'ui'` or `'hybrid'`.
+   * The Agent24 kernel uses this to register an icon + route in the nav.
+   */
+  navItem?: ModuleNavItem
+  /**
+   * LLM model identifiers this module requests access to (M3).
+   * The kernel resolves these against available AI-bridge adapters.
+   * Example: `["claude-3-5-sonnet", "gpt-4o"]`.
+   */
+  models?: string[]
+  /**
+   * BoxLite OCI container configuration (M4). When present, the Agent24
+   * runtime pulls the image and starts a sidecar container for this module.
+   */
+  container?: ContainerConfig
 }
 
 /** Minimal logger surface; real kernel logger arrives in M2. */
@@ -399,5 +474,65 @@ export function defineModule<
   if (!Array.isArray(manifest.permissions)) {
     throw new TypeError('defineModule: manifest.permissions must be an array')
   }
+
+  // ── Validate Agent24 optional fields when present ──────────────────────
+
+  if (manifest.type !== undefined) {
+    if (!(VALID_MODULE_TYPES as readonly string[]).includes(manifest.type)) {
+      throw new TypeError(
+        `defineModule: manifest.type must be one of ${VALID_MODULE_TYPES.map((t) => `'${t}'`).join(', ')} — got '${manifest.type}'`,
+      )
+    }
+  }
+
+  if (manifest.navItem !== undefined) {
+    const { navItem } = manifest
+    if (typeof navItem.icon !== 'string' || !navItem.icon) {
+      throw new TypeError('defineModule: manifest.navItem.icon must be a non-empty string')
+    }
+    if (typeof navItem.label !== 'string' || !navItem.label) {
+      throw new TypeError('defineModule: manifest.navItem.label must be a non-empty string')
+    }
+    if (typeof navItem.route !== 'string' || !navItem.route.startsWith('/')) {
+      throw new TypeError("defineModule: manifest.navItem.route must be a string starting with '/'")
+    }
+  }
+
+  if (manifest.container !== undefined) {
+    const { container } = manifest
+    if (typeof container.image !== 'string' || !container.image) {
+      throw new TypeError('defineModule: manifest.container.image must be a non-empty string')
+    }
+    if (
+      typeof container.port !== 'number' ||
+      !Number.isInteger(container.port) ||
+      container.port < 1 ||
+      container.port > 65535
+    ) {
+      throw new TypeError(
+        'defineModule: manifest.container.port must be an integer in range 1–65535',
+      )
+    }
+    if (
+      container.memoryMib !== undefined &&
+      (!Number.isInteger(container.memoryMib) || container.memoryMib <= 0)
+    ) {
+      throw new TypeError(
+        'defineModule: manifest.container.memoryMib must be a positive integer',
+      )
+    }
+  }
+
+  if (manifest.models !== undefined) {
+    if (
+      !Array.isArray(manifest.models) ||
+      manifest.models.some((m) => typeof m !== 'string' || !m)
+    ) {
+      throw new TypeError(
+        'defineModule: manifest.models must be an array of non-empty strings',
+      )
+    }
+  }
+
   return module
 }
