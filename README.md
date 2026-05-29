@@ -32,9 +32,20 @@ idoris/        # iDoris 能力包装 (input, process, query, create)
 ```bash
 pnpm install           # 安装所有 workspace 依赖
 pnpm -r build          # 构建所有包
-pnpm -r typecheck      # 类型检查
+pnpm -r typecheck      # 类型检查（每个包独立）
+pnpm test              # 运行所有测试（vitest）
+pnpm test:watch        # 测试 watch 模式
+pnpm test:coverage     # 测试 + 覆盖率报告
+pnpm bench             # 运行 benchmarks（vitest bench）
 pnpm --filter @auraaihq/core build   # 单包构建
 ```
+
+**测试约定**：
+
+- 文件位置：`<group>/<pkg>/src/**/*.{test,spec}.?(c|m)[jt]s?(x)`（test 与 spec 都识别）
+- benchmarks：`<group>/<pkg>/src/**/*.{bench,benchmark}.?(c|m)[jt]s?(x)`，由 `pnpm bench` 触发
+- 配置：根 `vitest.config.ts` 管 coverage + projects；每包自己的 `vitest.config.ts` 决定 environment / include 等局部行为
+- Projects：根 vitest 跨 `packages/community/publishers/scrapers/idoris` 五个 group 自动发现各包的 `vitest.config.{ts,js,mjs}`
 
 ## Versioning & Publishing
 
@@ -54,7 +65,15 @@ pnpm version
 pnpm release
 ```
 
-`access: public` 已配置，所有 `@auraaihq/*` 包默认公开发布。
+`access: public` 已配置，但 M0 阶段所有包标记为 `"private": true`——避免在没有真正 build pipeline 之前误发 `.ts` 入口。M1 实现真正构建后再翻开 private 标志。
+
+> **⚠️ 翻开 private 前的 checklist**（手动或 CI 检查）：
+> - `dist/` 目录存在且包含 `index.js`
+> - `package.json` 的 `main` 指向 `dist/`，不是 `src/`
+> - `package.json` 的 `exports`（如有）也指向 `dist/`
+> - `package.json` 的 `files` 改为 `["dist", "README.md", "LICENSE"]` —— 不再发 `src/`（避免发布测试文件）
+> - `tsconfig.build.json` 跑过 `noEmitOnError: true` 校验
+> - `LICENSE` 文件存在（已加入各包）
 
 ## License
 
