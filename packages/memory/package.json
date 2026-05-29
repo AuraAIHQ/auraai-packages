@@ -1,0 +1,37 @@
+{
+  "name": "@auraaihq/memory",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Layered memory system for Agent24 (L0-L3). M1 ships L0 (key-value, sqlite-backed, namespace-scoped). L1-L3 + SkillBank arrive in M3.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'build TBD (M1 next iteration) — when implemented, use: tsc -p tsconfig.build.json'",
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
+    "@types/node": "^22.0.0",
+    "vitest": "^4.1.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
