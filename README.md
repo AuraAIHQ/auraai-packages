@@ -31,14 +31,24 @@ idoris/        # iDoris 能力包装 (input, process, query, create)
 
 ```bash
 pnpm install           # 安装所有 workspace 依赖
-pnpm -r build          # 构建所有包
-pnpm -r typecheck      # 类型检查（每个包独立）
-pnpm test              # 运行所有测试（vitest）
+pnpm build             # turbo 编排构建所有包（带增量缓存）
+pnpm typecheck         # turbo 编排类型检查（带增量缓存）
+pnpm test              # 运行所有测试（vitest projects 模式，单进程，最快）
+pnpm test:turbo        # turbo 编排测试（每包独立进程，可缓存）
 pnpm test:watch        # 测试 watch 模式
 pnpm test:coverage     # 测试 + 覆盖率报告
 pnpm bench             # 运行 benchmarks（vitest bench）
+pnpm clean             # 清理所有 dist/ 和缓存
 pnpm --filter @auraaihq/core build   # 单包构建
 ```
+
+**turbo 编排**：构建/typecheck 通过 [turbo](https://turborepo.com) 调度，自动增量缓存（重跑未变更的包瞬间完成）。配置见 `turbo.json`。
+
+**`pnpm test` vs `pnpm test:turbo` 选择**：
+- 日常开发：用 `pnpm test`（vitest projects 模式，单进程，启动最快、输出最清晰）
+- CI 跑测试：用 `pnpm test:turbo`（每包独立进程 + turbo 缓存，重复 PR 推送时未变更的包能直接命中缓存）
+
+二者使用同一份 vitest config（每包 `vitest.config.ts`），不存在 drift。
 
 **测试约定**：
 

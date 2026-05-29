@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 .turbo/
+.turbo-cache/
 .next/
 *.log
 .DS_Store
