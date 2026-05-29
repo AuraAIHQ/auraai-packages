@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > 上下文来源: github.com/AAStarCommunity/Brood — 更新时自动同步
 
 @/Users/jason/Dev/Brood/protocol/MISSION.md
+@/Users/jason/Dev/Brood/protocol/PGL/CONTEXT.md
 @/Users/jason/Dev/Brood/orgs/auraai/PROFILE.md
 @/Users/jason/Dev/Brood/orgs/auraai/INTERFACES.md
 

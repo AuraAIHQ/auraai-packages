@@ -1,0 +1,29 @@
+{
+  "name": "@auraaihq/boxlite-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BoxLite OCI container client — service manager (SimpleBox) + sandboxed Python runner (CodeBox)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist .turbo"
+  },
+  "peerDependencies": {
+    "@boxlite-ai/boxlite": "^0.9.3"
+  },
+  "peerDependenciesMeta": {
+    "@boxlite-ai/boxlite": { "optional": true }
+  },
+  "devDependencies": {
+    "@auraaihq/sdk": "file:../sdk",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.5"
+  }
+}
