@@ -24,6 +24,25 @@ importers:
         specifier: ^4.1.5
         version: 4.1.5(@types/node@22.19.17)(@vitest/coverage-v8@4.1.5)(vite@8.0.10(@types/node@22.19.17))
 
+  packages/boxlite-client:
+    dependencies:
+      '@boxlite-ai/boxlite':
+        specifier: ^0.9.3
+        version: 0.9.5
+    devDependencies:
+      '@auraaihq/sdk':
+        specifier: file:../sdk
+        version: link:../sdk
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.5(@types/node@22.19.17)(@vitest/coverage-v8@4.1.5)(vite@8.0.10(@types/node@22.19.17))
+
   packages/cli:
     devDependencies:
       '@types/node':
@@ -135,6 +154,21 @@ packages:
   '@bcoe/v8-coverage@1.0.2':
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
+
+  '@boxlite-ai/boxlite-darwin-arm64@0.9.5':
+    resolution: {integrity: sha512-5eMmAtSBUd7Cqa7zm+zJc4JyJukqzNV0PerUSG1PjSkb6AGZnXTcrshwp2ekXex0gXqeG2fMANKRoIRZ0M6AHQ==}
+    engines: {node: '>=18.0.0'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@boxlite-ai/boxlite@0.9.5':
+    resolution: {integrity: sha512-Wvg1Jov7BnoLDq2/lZUU1L7HWS49A5f407Xn/et5vRmdjbnGkTfQmOzfNbR+mEy69AcKKky40mKDIs3gy9h2tQ==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      playwright-core: '>=1.58.0'
+    peerDependenciesMeta:
+      playwright-core:
+        optional: true
 
   '@changesets/apply-release-plan@7.1.1':
     resolution: {integrity: sha512-9qPCm/rLx/xoOFXIHGB229+4GOL76S4MC+7tyOuTsR6+1jYlfFDQORdvwR5hDA6y4FL2BPt3qpbcQIS+dW85LA==}
@@ -1165,6 +1199,13 @@ snapshots:
       '@babel/helper-validator-identifier': 7.28.5
 
   '@bcoe/v8-coverage@1.0.2': {}
+
+  '@boxlite-ai/boxlite-darwin-arm64@0.9.5':
+    optional: true
+
+  '@boxlite-ai/boxlite@0.9.5':
+    optionalDependencies:
+      '@boxlite-ai/boxlite-darwin-arm64': 0.9.5
 
   '@changesets/apply-release-plan@7.1.1':
     dependencies:
