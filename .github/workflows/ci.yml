@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 2  # for changeset detection on PRs
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         # Version comes from package.json packageManager field (pnpm@9.12.0).
         # Don't pass `version:` here to avoid ERR_PNPM_BAD_PM_VERSION conflicts.
 
@@ -105,7 +105,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         # Version comes from package.json packageManager field (pnpm@9.12.0).
         # Don't pass `version:` here to avoid ERR_PNPM_BAD_PM_VERSION conflicts.
 
