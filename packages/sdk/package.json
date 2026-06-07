@@ -1,6 +1,7 @@
 {
   "name": "@auraaihq/sdk",
   "version": "0.0.0",
+  "private": true,
   "description": "Public SDK for Agent24-Desktop module developers — types, helpers, lifecycle hooks",
   "license": "MIT",
   "type": "module",
@@ -8,10 +9,22 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "echo 'build TBD (M1)'",
-    "test": "echo 'tests TBD (M1)'"
+    "build": "echo 'build TBD (M1) — when implemented, use: tsc -p tsconfig.build.json'",
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.5"
   },
   "publishConfig": {
     "access": "public"

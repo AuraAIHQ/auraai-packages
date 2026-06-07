@@ -1,0 +1,34 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmitOnError": true
+  },
+  "exclude": [
+    "**/node_modules",
+    "**/dist",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.test.cts",
+    "**/*.test.mts",
+    "**/*.test.js",
+    "**/*.test.jsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/*.spec.cts",
+    "**/*.spec.mts",
+    "**/*.spec.js",
+    "**/*.spec.jsx",
+    "**/*.bench.ts",
+    "**/*.bench.tsx",
+    "**/*.bench.cts",
+    "**/*.bench.mts",
+    "**/*.bench.js",
+    "**/*.bench.jsx",
+    "**/*.benchmark.ts",
+    "**/*.benchmark.tsx",
+    "**/*.benchmark.cts",
+    "**/*.benchmark.mts",
+    "**/*.benchmark.js",
+    "**/*.benchmark.jsx"
+  ]
+}

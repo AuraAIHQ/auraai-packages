@@ -12,6 +12,10 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "lib": ["ES2022"]
-  }
+    "lib": ["ES2022", "DOM"]
+  },
+  "exclude": [
+    "**/node_modules",
+    "**/dist"
+  ]
 }

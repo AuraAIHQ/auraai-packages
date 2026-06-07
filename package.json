@@ -10,16 +10,23 @@
   },
   "packageManager": "pnpm@9.12.0",
   "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
-    "clean": "pnpm -r clean",
+    "build": "turbo run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:turbo": "turbo run test",
+    "bench": "vitest bench",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules/.cache",
     "changeset": "changeset",
     "version": "changeset version",
     "release": "changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
-    "typescript": "^5.4.5"
+    "@vitest/coverage-v8": "^4.1.5",
+    "turbo": "^2.9.6",
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.5"
   }
 }
