@@ -45,7 +45,7 @@ jobs:
         run: pnpm build
 
       - name: Create Release Pull Request or Publish to npm
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           # Run changeset version + commit OR publish if a versioning PR has been merged
           publish: pnpm release
